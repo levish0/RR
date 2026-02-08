@@ -51,6 +51,14 @@ main();
 "#;
     let (ok, stdout, _stderr) = run_compile(src, "parse_multi.rr");
     assert!(!ok, "compile must fail");
-    assert!(stdout.contains("parse failed"), "missing aggregate parse header:\n{}", stdout);
-    assert!(stdout.contains("found "), "missing aggregate count:\n{}", stdout);
+    assert!(
+        stdout.contains("parse failed"),
+        "missing aggregate parse header:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("found "),
+        "missing aggregate count:\n{}",
+        stdout
+    );
 }

@@ -1,6 +1,5 @@
-﻿
+use crate::mir::analyze::{alias, effects, na};
 use crate::mir::*;
-use crate::mir::analyze::{na, effects, alias};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 pub fn optimize(fn_ir: &mut FnIR) -> bool {
@@ -98,10 +97,12 @@ fn is_cse_eligible(fn_ir: &FnIR, kind: &ValueKind, ctx: &CseContext) -> bool {
             {
                 return false;
             }
-            !args.iter().any(|a| value_reads_mutated_alias(fn_ir, *a, ctx, &mut HashSet::new()))
+            !args
+                .iter()
+                .any(|a| value_reads_mutated_alias(fn_ir, *a, ctx, &mut HashSet::new()))
         }
         ValueKind::Phi { args } if args.is_empty() => false, // Incomplete phi
-        ValueKind::Load { .. } => false, // Loads can change across assignments
+        ValueKind::Load { .. } => false,                     // Loads can change across assignments
         ValueKind::Index2D { base, .. } => {
             if ctx.has_impure_call || ctx.has_unknown_mutation {
                 return false;
@@ -112,7 +113,12 @@ fn is_cse_eligible(fn_ir: &FnIR, kind: &ValueKind, ctx: &CseContext) -> bool {
             }
             !ctx.mutated_aliases.contains(&cls)
         }
-        ValueKind::Index1D { base, is_safe, is_na_safe, .. } => {
+        ValueKind::Index1D {
+            base,
+            is_safe,
+            is_na_safe,
+            ..
+        } => {
             if !*is_safe || !*is_na_safe {
                 return false;
             }
@@ -196,35 +202,63 @@ fn canonicalize_kind(mut kind: ValueKind, replacements: &HashMap<ValueId, ValueI
     // 1. Map inputs to their canonical IDs if already replaced
     match &mut kind {
         ValueKind::Binary { lhs, rhs, .. } => {
-            if let Some(&n) = replacements.get(lhs) { *lhs = n; }
-            if let Some(&n) = replacements.get(rhs) { *rhs = n; }
+            if let Some(&n) = replacements.get(lhs) {
+                *lhs = n;
+            }
+            if let Some(&n) = replacements.get(rhs) {
+                *rhs = n;
+            }
             // Sort if commutative
-            // Add/Mul/Eq/Ne/... 
+            // Add/Mul/Eq/Ne/...
         }
         ValueKind::Unary { rhs, .. } => {
-            if let Some(&n) = replacements.get(rhs) { *rhs = n; }
+            if let Some(&n) = replacements.get(rhs) {
+                *rhs = n;
+            }
         }
         ValueKind::Phi { args } => {
-            for (a, _) in args { if let Some(&n) = replacements.get(a) { *a = n; } }
+            for (a, _) in args {
+                if let Some(&n) = replacements.get(a) {
+                    *a = n;
+                }
+            }
         }
         ValueKind::Index1D { base, idx, .. } => {
-            if let Some(&n) = replacements.get(base) { *base = n; }
-            if let Some(&n) = replacements.get(idx) { *idx = n; }
+            if let Some(&n) = replacements.get(base) {
+                *base = n;
+            }
+            if let Some(&n) = replacements.get(idx) {
+                *idx = n;
+            }
         }
         ValueKind::Index2D { base, r, c } => {
-            if let Some(&n) = replacements.get(base) { *base = n; }
-            if let Some(&n) = replacements.get(r) { *r = n; }
-            if let Some(&n) = replacements.get(c) { *c = n; }
+            if let Some(&n) = replacements.get(base) {
+                *base = n;
+            }
+            if let Some(&n) = replacements.get(r) {
+                *r = n;
+            }
+            if let Some(&n) = replacements.get(c) {
+                *c = n;
+            }
         }
         ValueKind::Len { base } => {
-            if let Some(&n) = replacements.get(base) { *base = n; }
+            if let Some(&n) = replacements.get(base) {
+                *base = n;
+            }
         }
         ValueKind::Indices { base } => {
-            if let Some(&n) = replacements.get(base) { *base = n; }
+            if let Some(&n) = replacements.get(base) {
+                *base = n;
+            }
         }
         ValueKind::Range { start, end } => {
-            if let Some(&n) = replacements.get(start) { *start = n; }
-            if let Some(&n) = replacements.get(end) { *end = n; }
+            if let Some(&n) = replacements.get(start) {
+                *start = n;
+            }
+            if let Some(&n) = replacements.get(end) {
+                *end = n;
+            }
         }
         _ => {}
     }
@@ -235,24 +269,56 @@ fn apply_replacements(fn_ir: &mut FnIR, replacements: &HashMap<ValueId, ValueId>
     for b in &mut fn_ir.blocks {
         for instr in &mut b.instrs {
             match instr {
-                Instr::Assign { src, .. } => if let Some(&n) = replacements.get(src) { *src = n; },
-                Instr::Eval { val, .. } => if let Some(&n) = replacements.get(val) { *val = n; },
-                Instr::StoreIndex1D { base, idx, val, .. } => {
-                    if let Some(&n) = replacements.get(base) { *base = n; }
-                    if let Some(&n) = replacements.get(idx) { *idx = n; }
-                    if let Some(&n) = replacements.get(val) { *val = n; }
+                Instr::Assign { src, .. } => {
+                    if let Some(&n) = replacements.get(src) {
+                        *src = n;
+                    }
                 }
-                Instr::StoreIndex2D { base, r, c, val, .. } => {
-                    if let Some(&n) = replacements.get(base) { *base = n; }
-                    if let Some(&n) = replacements.get(r) { *r = n; }
-                    if let Some(&n) = replacements.get(c) { *c = n; }
-                    if let Some(&n) = replacements.get(val) { *val = n; }
+                Instr::Eval { val, .. } => {
+                    if let Some(&n) = replacements.get(val) {
+                        *val = n;
+                    }
+                }
+                Instr::StoreIndex1D { base, idx, val, .. } => {
+                    if let Some(&n) = replacements.get(base) {
+                        *base = n;
+                    }
+                    if let Some(&n) = replacements.get(idx) {
+                        *idx = n;
+                    }
+                    if let Some(&n) = replacements.get(val) {
+                        *val = n;
+                    }
+                }
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => {
+                    if let Some(&n) = replacements.get(base) {
+                        *base = n;
+                    }
+                    if let Some(&n) = replacements.get(r) {
+                        *r = n;
+                    }
+                    if let Some(&n) = replacements.get(c) {
+                        *c = n;
+                    }
+                    if let Some(&n) = replacements.get(val) {
+                        *val = n;
+                    }
                 }
             }
         }
         match &mut b.term {
-            Terminator::If { cond, .. } => if let Some(&n) = replacements.get(cond) { *cond = n; },
-            Terminator::Return(Some(v)) => if let Some(&n) = replacements.get(v) { *v = n; },
+            Terminator::If { cond, .. } => {
+                if let Some(&n) = replacements.get(cond) {
+                    *cond = n;
+                }
+            }
+            Terminator::Return(Some(v)) => {
+                if let Some(&n) = replacements.get(v) {
+                    *v = n;
+                }
+            }
             _ => {}
         }
     }
@@ -261,26 +327,50 @@ fn apply_replacements(fn_ir: &mut FnIR, replacements: &HashMap<ValueId, ValueId>
         let mut kind = fn_ir.values[i].kind.clone();
         match &mut kind {
             ValueKind::Binary { lhs, rhs, .. } => {
-                if let Some(&n) = replacements.get(lhs) { *lhs = n; }
-                if let Some(&n) = replacements.get(rhs) { *rhs = n; }
+                if let Some(&n) = replacements.get(lhs) {
+                    *lhs = n;
+                }
+                if let Some(&n) = replacements.get(rhs) {
+                    *rhs = n;
+                }
             }
             ValueKind::Unary { rhs, .. } => {
-                if let Some(&n) = replacements.get(rhs) { *rhs = n; }
+                if let Some(&n) = replacements.get(rhs) {
+                    *rhs = n;
+                }
             }
             ValueKind::Phi { args } => {
-                for (a, _) in args { if let Some(&n) = replacements.get(a) { *a = n; } }
+                for (a, _) in args {
+                    if let Some(&n) = replacements.get(a) {
+                        *a = n;
+                    }
+                }
             }
             ValueKind::Call { args, .. } => {
-                for a in args { if let Some(&n) = replacements.get(a) { *a = n; } }
+                for a in args {
+                    if let Some(&n) = replacements.get(a) {
+                        *a = n;
+                    }
+                }
             }
             ValueKind::Index1D { base, idx, .. } => {
-                if let Some(&n) = replacements.get(base) { *base = n; }
-                if let Some(&n) = replacements.get(idx) { *idx = n; }
+                if let Some(&n) = replacements.get(base) {
+                    *base = n;
+                }
+                if let Some(&n) = replacements.get(idx) {
+                    *idx = n;
+                }
             }
             ValueKind::Index2D { base, r, c } => {
-                if let Some(&n) = replacements.get(base) { *base = n; }
-                if let Some(&n) = replacements.get(r) { *r = n; }
-                if let Some(&n) = replacements.get(c) { *c = n; }
+                if let Some(&n) = replacements.get(base) {
+                    *base = n;
+                }
+                if let Some(&n) = replacements.get(r) {
+                    *r = n;
+                }
+                if let Some(&n) = replacements.get(c) {
+                    *c = n;
+                }
             }
             _ => {}
         }
@@ -300,11 +390,19 @@ fn compute_reachable(fn_ir: &FnIR) -> HashSet<BlockId> {
         if let Some(blk) = fn_ir.blocks.get(bid) {
             match &blk.term {
                 Terminator::Goto(t) => {
-                    if reachable.insert(*t) { queue.push(*t); }
+                    if reachable.insert(*t) {
+                        queue.push(*t);
+                    }
                 }
-                Terminator::If { then_bb, else_bb, .. } => {
-                    if reachable.insert(*then_bb) { queue.push(*then_bb); }
-                    if reachable.insert(*else_bb) { queue.push(*else_bb); }
+                Terminator::If {
+                    then_bb, else_bb, ..
+                } => {
+                    if reachable.insert(*then_bb) {
+                        queue.push(*then_bb);
+                    }
+                    if reachable.insert(*else_bb) {
+                        queue.push(*else_bb);
+                    }
                 }
                 _ => {}
             }
@@ -318,8 +416,10 @@ fn build_pred_map(fn_ir: &FnIR) -> HashMap<BlockId, Vec<BlockId>> {
     for (src, blk) in fn_ir.blocks.iter().enumerate() {
         let targets = match &blk.term {
             Terminator::Goto(t) => vec![*t],
-            Terminator::If { then_bb, else_bb, .. } => vec![*then_bb, *else_bb],
-            _ => vec![]
+            Terminator::If {
+                then_bb, else_bb, ..
+            } => vec![*then_bb, *else_bb],
+            _ => vec![],
         };
         for t in targets {
             map.entry(t).or_insert_with(Vec::new).push(src);
@@ -328,7 +428,10 @@ fn build_pred_map(fn_ir: &FnIR) -> HashMap<BlockId, Vec<BlockId>> {
     map
 }
 
-fn compute_dominators(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> HashMap<BlockId, HashSet<BlockId>> {
+fn compute_dominators(
+    fn_ir: &FnIR,
+    reachable: &HashSet<BlockId>,
+) -> HashMap<BlockId, HashSet<BlockId>> {
     let preds = build_pred_map(fn_ir);
     let all_blocks: HashSet<BlockId> = reachable.iter().cloned().collect();
     let mut doms: HashMap<BlockId, HashSet<BlockId>> = HashMap::new();
@@ -344,13 +447,19 @@ fn compute_dominators(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> HashMap<Blo
     while changed {
         changed = false;
         for &bb in &all_blocks {
-            if bb == fn_ir.entry { continue; }
+            if bb == fn_ir.entry {
+                continue;
+            }
             let pred_list = preds.get(&bb).cloned().unwrap_or_default();
-            if pred_list.is_empty() { continue; }
+            if pred_list.is_empty() {
+                continue;
+            }
 
             let mut new_dom: Option<HashSet<BlockId>> = None;
             for p in pred_list {
-                if !reachable.contains(&p) { continue; }
+                if !reachable.contains(&p) {
+                    continue;
+                }
                 if let Some(p_dom) = doms.get(&p) {
                     match new_dom {
                         None => new_dom = Some(p_dom.clone()),
@@ -384,7 +493,9 @@ fn compute_def_blocks(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> Vec<Option<
     }
 
     for bid in 0..fn_ir.blocks.len() {
-        if !reachable.contains(&bid) { continue; }
+        if !reachable.contains(&bid) {
+            continue;
+        }
         let blk = &fn_ir.blocks[bid];
         for instr in &blk.instrs {
             match instr {
@@ -395,7 +506,9 @@ fn compute_def_blocks(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> Vec<Option<
                     worklist.push_back((*idx, bid));
                     worklist.push_back((*val, bid));
                 }
-                Instr::StoreIndex2D { base, r, c, val, .. } => {
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => {
                     worklist.push_back((*base, bid));
                     worklist.push_back((*r, bid));
                     worklist.push_back((*c, bid));
@@ -460,15 +573,24 @@ fn compute_def_blocks(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> Vec<Option<
     def_blocks
 }
 
-fn dominates_value(existing: ValueId, current: ValueId, def_blocks: &[Option<BlockId>], doms: &HashMap<BlockId, HashSet<BlockId>>) -> bool {
-    match (def_blocks.get(existing).and_then(|x| *x), def_blocks.get(current).and_then(|x| *x)) {
+fn dominates_value(
+    existing: ValueId,
+    current: ValueId,
+    def_blocks: &[Option<BlockId>],
+    doms: &HashMap<BlockId, HashSet<BlockId>>,
+) -> bool {
+    match (
+        def_blocks.get(existing).and_then(|x| *x),
+        def_blocks.get(current).and_then(|x| *x),
+    ) {
         (Some(def_existing), Some(def_current)) => {
             if def_existing == def_current {
                 // Values in the same block are only safe to reuse when the
                 // representative was created earlier in SSA/value order.
                 existing < current
             } else {
-                doms.get(&def_current).map_or(false, |set| set.contains(&def_existing))
+                doms.get(&def_current)
+                    .map_or(false, |set| set.contains(&def_existing))
             }
         }
         _ => false,
@@ -479,8 +601,8 @@ fn dominates_value(existing: ValueId, current: ValueId, def_blocks: &[Option<Blo
 mod tests {
     use super::*;
     use crate::mir::flow::Facts;
-    use crate::utils::Span;
     use crate::syntax::ast::BinOp;
+    use crate::utils::Span;
 
     fn one_block_fn(name: &str) -> FnIR {
         let mut f = FnIR::new(name.to_string(), vec![]);
@@ -493,7 +615,12 @@ mod tests {
     #[test]
     fn gvn_cse_pure_calls() {
         let mut fn_ir = one_block_fn("gvn_call");
-        let c1 = fn_ir.add_value(ValueKind::Const(Lit::Int(4)), Span::dummy(), Facts::empty(), None);
+        let c1 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(4)),
+            Span::dummy(),
+            Facts::empty(),
+            None,
+        );
         let call1 = fn_ir.add_value(
             ValueKind::Call {
                 callee: "abs".to_string(),
@@ -529,7 +656,9 @@ mod tests {
         let changed = optimize(&mut fn_ir);
         assert!(changed, "expected pure-call CSE to fire");
         match fn_ir.values[sum].kind {
-            ValueKind::Binary { lhs, rhs, .. } => assert_eq!(lhs, rhs, "expected duplicated pure call to be CSE'd"),
+            ValueKind::Binary { lhs, rhs, .. } => {
+                assert_eq!(lhs, rhs, "expected duplicated pure call to be CSE'd")
+            }
             _ => panic!("sum value shape changed unexpectedly"),
         }
     }
@@ -545,7 +674,12 @@ mod tests {
             Facts::empty(),
             Some("m".to_string()),
         );
-        let one = fn_ir.add_value(ValueKind::Const(Lit::Int(1)), Span::dummy(), Facts::empty(), None);
+        let one = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(1)),
+            Span::dummy(),
+            Facts::empty(),
+            None,
+        );
         let idx1 = fn_ir.add_value(
             ValueKind::Index2D {
                 base,
@@ -581,7 +715,9 @@ mod tests {
         let changed = optimize(&mut fn_ir);
         assert!(changed, "expected Index2D CSE to fire");
         match fn_ir.values[sum].kind {
-            ValueKind::Binary { lhs, rhs, .. } => assert_eq!(lhs, rhs, "expected duplicated Index2D read to be CSE'd"),
+            ValueKind::Binary { lhs, rhs, .. } => {
+                assert_eq!(lhs, rhs, "expected duplicated Index2D read to be CSE'd")
+            }
             _ => panic!("sum value shape changed unexpectedly"),
         }
     }

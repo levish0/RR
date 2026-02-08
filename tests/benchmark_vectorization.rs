@@ -33,7 +33,11 @@ print(vec_map(8));
         .arg("-O1")
         .status()
         .expect("failed to run RR compiler");
-    assert!(status.success(), "RR compile failed for {}", rr_src.display());
+    assert!(
+        status.success(),
+        "RR compile failed for {}",
+        rr_src.display()
+    );
 
     let code = fs::read_to_string(&out_path).expect("failed to read compiled R");
     assert!(

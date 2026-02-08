@@ -1,8 +1,8 @@
-﻿use crate::hir::def as hir;
-use crate::mir::*;
 use crate::error::RR;
-use crate::syntax::ast::{Lit, BinOp};
+use crate::hir::def as hir;
 use crate::mir::flow::Facts;
+use crate::mir::*;
+use crate::syntax::ast::{BinOp, Lit};
 use crate::utils::Span;
 use std::collections::HashMap;
 
@@ -15,22 +15,22 @@ struct LoopTargets {
 
 pub struct MirLowerer {
     fn_ir: FnIR,
-    
+
     // SSA construction state.
     curr_block: BlockId,
-    
+
     // Current definitions per block (sealed SSA construction).
     defs: HashMap<BlockId, HashMap<hir::LocalId, ValueId>>,
-    
+
     // Deferred phi operands for unsealed blocks.
     incomplete_phis: HashMap<BlockId, Vec<(hir::LocalId, ValueId)>>,
     sealed_blocks: std::collections::HashSet<BlockId>,
     // Predecessor map for SSA reads.
     preds: HashMap<BlockId, Vec<BlockId>>,
-    
+
     // Name mapping for codegen.
     var_names: HashMap<hir::LocalId, String>,
-    
+
     // Symbol table snapshot.
     symbols: HashMap<hir::SymbolId, String>,
     known_functions: HashMap<String, usize>,
@@ -50,12 +50,12 @@ impl MirLowerer {
         let body_head = fn_ir.add_block();
         fn_ir.entry = entry;
         fn_ir.body_head = body_head;
-        
+
         // Init defs map for entry
         let mut defs = HashMap::new();
         defs.insert(entry, HashMap::new());
         defs.insert(body_head, HashMap::new());
-        
+
         Self {
             fn_ir,
             curr_block: entry,
@@ -69,23 +69,34 @@ impl MirLowerer {
             loop_stack: Vec::new(),
         }
     }
-    
+
     // Core Helpers
     fn add_pred(&mut self, target: BlockId, pred: BlockId) {
         self.preds.entry(target).or_insert_with(Vec::new).push(pred);
     }
-    
+
     // Standardize Value Addition
     fn add_value(&mut self, kind: ValueKind, span: Span) -> ValueId {
         self.fn_ir.add_value(kind, span, Facts::empty(), None)
     }
 
-    fn add_value_with_name(&mut self, kind: ValueKind, span: Span, var_name: Option<String>) -> ValueId {
+    fn add_value_with_name(
+        &mut self,
+        kind: ValueKind,
+        span: Span,
+        var_name: Option<String>,
+    ) -> ValueId {
         self.fn_ir.add_value(kind, span, Facts::empty(), var_name)
     }
-    
+
     // Core Helpers
-    fn define_var_at(&mut self, block: BlockId, var: hir::LocalId, val: ValueId, emit_assign: bool) {
+    fn define_var_at(
+        &mut self,
+        block: BlockId,
+        var: hir::LocalId,
+        val: ValueId,
+        emit_assign: bool,
+    ) {
         // Update origin_var of the value to the name of this local
         let name = self.var_names.get(&var).cloned();
         if let Some(n) = &name {
@@ -110,7 +121,7 @@ impl MirLowerer {
     fn write_var(&mut self, var: hir::LocalId, val: ValueId) {
         self.define_var_at(self.curr_block, var, val, true);
     }
-    
+
     fn read_var(&mut self, var: hir::LocalId, block: BlockId) -> RR<ValueId> {
         if let Some(m) = self.defs.get(&block) {
             if let Some(&v) = m.get(&var) {
@@ -120,34 +131,38 @@ impl MirLowerer {
         // Not found in local, look in predecessors
         self.read_var_recursive(var, block)
     }
-    
-    
+
     // Sealed Block SSA Construction (Braun et al.)
-    
+
     fn seal_block(&mut self, block: BlockId) -> RR<()> {
-        if self.sealed_blocks.contains(&block) { return Ok(()); }
-        
+        if self.sealed_blocks.contains(&block) {
+            return Ok(());
+        }
+
         // Resolve incomplete Phis
         if let Some(incomplete) = self.incomplete_phis.remove(&block) {
             for (var, phi_val) in incomplete {
-               self.add_phi_operands(block, var, phi_val)?;
+                self.add_phi_operands(block, var, phi_val)?;
             }
         }
-        
+
         self.sealed_blocks.insert(block);
         Ok(())
     }
-    
+
     fn read_var_recursive(&mut self, var: hir::LocalId, block: BlockId) -> RR<ValueId> {
         if !self.sealed_blocks.contains(&block) {
             // Create a placeholder phi and resolve operands when the block is sealed.
             let phi = self.add_phi_placeholder(block, Span::default());
-            self.incomplete_phis.entry(block).or_default().push((var.clone(), phi));
+            self.incomplete_phis
+                .entry(block)
+                .or_default()
+                .push((var.clone(), phi));
             // Define the SSA name for this block without emitting an assignment.
             self.define_var_at(block, var, phi, false);
             return Ok(phi);
         }
-        
+
         let preds = self.preds.get(&block).cloned().unwrap_or_default();
         if preds.is_empty() {
             let var_name = self
@@ -155,17 +170,18 @@ impl MirLowerer {
                 .get(&var)
                 .cloned()
                 .unwrap_or_else(|| format!("local#{}", var.0));
-            return Err(
-                crate::error::RRException::new(
-                    "RR.SemanticError",
-                    crate::error::RRCode::E1001,
-                    crate::error::Stage::Mir,
-                    format!("undefined variable '{}'", var_name),
-                )
-                .at(Span::default())
-                .push_frame("mir::lower_hir::read_var_recursive/2", Some(Span::default()))
-                .note("Declare the variable with let before use."),
-            );
+            return Err(crate::error::RRException::new(
+                "RR.SemanticError",
+                crate::error::RRCode::E1001,
+                crate::error::Stage::Mir,
+                format!("undefined variable '{}'", var_name),
+            )
+            .at(Span::default())
+            .push_frame(
+                "mir::lower_hir::read_var_recursive/2",
+                Some(Span::default()),
+            )
+            .note("Declare the variable with let before use."));
         } else if preds.len() == 1 {
             // Optimize: No phi needed, just look in pred
             self.read_var(var.clone(), preds[0])
@@ -178,7 +194,7 @@ impl MirLowerer {
             Ok(phi)
         }
     }
-    
+
     fn add_phi_operands(&mut self, block: BlockId, var: hir::LocalId, phi_val: ValueId) -> RR<()> {
         // Collect operands from all preds
         let preds = self.preds.get(&block).cloned().unwrap_or_default();
@@ -187,22 +203,22 @@ impl MirLowerer {
             let val = self.read_var(var.clone(), pred)?;
             new_args.push((val, pred));
         }
-        
+
         // Update Phi instruction
         if let Some(val) = self.fn_ir.values.get_mut(phi_val) {
-             if let ValueKind::Phi { ref mut args } = val.kind {
-                 *args = new_args;
-             } else {
-                 panic!("Value {:?} is not a Phi", phi_val);
-             }
+            if let ValueKind::Phi { ref mut args } = val.kind {
+                *args = new_args;
+            } else {
+                panic!("Value {:?} is not a Phi", phi_val);
+            }
         } else {
             panic!("Value {:?} not found", phi_val);
         }
-        
+
         // Trivial Phi elimination could be done here (if all args same)
         Ok(())
     }
-    
+
     fn add_phi_placeholder(&mut self, _block: BlockId, span: Span) -> ValueId {
         let id = self.add_value(ValueKind::Phi { args: vec![] }, span);
         if let Some(v) = self.fn_ir.values.get_mut(id) {
@@ -212,12 +228,14 @@ impl MirLowerer {
     }
 
     // Call update: terminate must track preds
-    
+
     pub fn lower_fn(mut self, f: hir::HirFn) -> RR<FnIR> {
         // 1. Bind parameters in the entry block
         for (i, param) in f.params.iter().enumerate() {
             let param_name = self.symbols[&param.name].clone(); // Clone early to avoid borrow conflict
-            if let Some((&local_id, _)) = self.var_names.iter().find(|(_, name)| **name == param_name) {
+            if let Some((&local_id, _)) =
+                self.var_names.iter().find(|(_, name)| **name == param_name)
+            {
                 // Initialize parameter Value
                 let param_val = self.add_value(ValueKind::Param { index: i }, param.span);
                 // Set the origin_var of the Param Value specifically to the original name
@@ -240,28 +258,30 @@ impl MirLowerer {
 
         // 3. Lower Body
         let ret_val = self.lower_block(f.body)?;
-        
+
         // Implicit return if not terminated
         if !self.is_terminated(self.curr_block) {
             self.fn_ir.blocks[self.curr_block].term = Terminator::Return(Some(ret_val));
         }
-        
+
         Ok(self.fn_ir)
     }
 
     fn lower_block(&mut self, blk: hir::HirBlock) -> RR<ValueId> {
         let mut last_val = self.add_void_val(blk.span);
         let len = blk.stmts.len();
-        
+
         for (i, stmt) in blk.stmts.into_iter().enumerate() {
             if let hir::HirStmt::Expr { expr, span } = stmt {
                 let val = self.lower_expr(expr)?;
                 if i < len - 1 {
                     // Non-tail expression statements are evaluated for effects.
-                    self.fn_ir.blocks[self.curr_block].instrs.push(Instr::Eval { val, span });
+                    self.fn_ir.blocks[self.curr_block]
+                        .instrs
+                        .push(Instr::Eval { val, span });
                     last_val = self.add_void_val(span);
                 } else {
-                    last_val = val; 
+                    last_val = val;
                 }
             } else {
                 self.lower_stmt(stmt)?;
@@ -270,10 +290,12 @@ impl MirLowerer {
         }
         Ok(last_val)
     }
-    
+
     fn lower_stmt(&mut self, stmt: hir::HirStmt) -> RR<()> {
         match stmt {
-            hir::HirStmt::Let { local, init, span, .. } => {
+            hir::HirStmt::Let {
+                local, init, span, ..
+            } => {
                 let val = if let Some(e) = init {
                     self.lower_expr(e)?
                 } else {
@@ -281,7 +303,11 @@ impl MirLowerer {
                 };
                 self.write_var(local, val);
             }
-            hir::HirStmt::Assign { target, value, span } => {
+            hir::HirStmt::Assign {
+                target,
+                value,
+                span,
+            } => {
                 let v = self.lower_expr(value)?;
                 match target {
                     hir::HirLValue::Local(l) => self.write_var(l, v),
@@ -293,24 +319,28 @@ impl MirLowerer {
                         }
                         match ids.as_slice() {
                             [idx] => {
-                                self.fn_ir.blocks[self.curr_block].instrs.push(Instr::StoreIndex1D {
-                                    base: base_id,
-                                    idx: *idx,
-                                    val: v,
-                                    is_safe: false,
-                                    is_na_safe: false,
-                                    is_vector: false,
-                                    span,
-                                });
+                                self.fn_ir.blocks[self.curr_block].instrs.push(
+                                    Instr::StoreIndex1D {
+                                        base: base_id,
+                                        idx: *idx,
+                                        val: v,
+                                        is_safe: false,
+                                        is_na_safe: false,
+                                        is_vector: false,
+                                        span,
+                                    },
+                                );
                             }
                             [r, c] => {
-                                self.fn_ir.blocks[self.curr_block].instrs.push(Instr::StoreIndex2D {
-                                    base: base_id,
-                                    r: *r,
-                                    c: *c,
-                                    val: v,
-                                    span,
-                                });
+                                self.fn_ir.blocks[self.curr_block].instrs.push(
+                                    Instr::StoreIndex2D {
+                                        base: base_id,
+                                        r: *r,
+                                        c: *c,
+                                        val: v,
+                                        span,
+                                    },
+                                );
                             }
                             _ => {
                                 return Err(crate::error::RRException::new(
@@ -328,7 +358,8 @@ impl MirLowerer {
                             .get(&name)
                             .cloned()
                             .unwrap_or_else(|| format!("field_{}", name.0));
-                        let field_lit = self.add_value(ValueKind::Const(Lit::Str(field_name)), span);
+                        let field_lit =
+                            self.add_value(ValueKind::Const(Lit::Str(field_name)), span);
                         let base_clone = base.clone();
                         let base_id = self.lower_expr(base)?;
                         let set_id = self.add_value(
@@ -345,46 +376,59 @@ impl MirLowerer {
                             }
                             hir::HirExpr::Global(sym) => {
                                 if let Some(dst_name) = self.symbols.get(&sym).cloned() {
-                                    self.fn_ir.blocks[self.curr_block].instrs.push(Instr::Assign {
-                                        dst: dst_name,
-                                        src: set_id,
-                                        span,
-                                    });
+                                    self.fn_ir.blocks[self.curr_block]
+                                        .instrs
+                                        .push(Instr::Assign {
+                                            dst: dst_name,
+                                            src: set_id,
+                                            span,
+                                        });
                                 } else {
-                                    self.fn_ir.blocks[self.curr_block].instrs.push(Instr::Eval {
-                                        val: set_id,
-                                        span,
-                                    });
+                                    self.fn_ir.blocks[self.curr_block]
+                                        .instrs
+                                        .push(Instr::Eval { val: set_id, span });
                                 }
                             }
                             _ => {
                                 // Fallback: preserve side effect when base isn't a writable symbol.
-                                self.fn_ir.blocks[self.curr_block].instrs.push(Instr::Eval {
-                                    val: set_id,
-                                    span,
-                                });
+                                self.fn_ir.blocks[self.curr_block]
+                                    .instrs
+                                    .push(Instr::Eval { val: set_id, span });
                             }
                         }
                     }
                 }
             }
             hir::HirStmt::Expr { expr, .. } => {
-                 self.lower_expr(expr)?;
+                self.lower_expr(expr)?;
             }
             hir::HirStmt::Return { value, span: _span } => {
-                let v = if let Some(e) = value { Some(self.lower_expr(e)?) } else { None };
+                let v = if let Some(e) = value {
+                    Some(self.lower_expr(e)?)
+                } else {
+                    None
+                };
                 self.terminate_and_detach(Terminator::Return(v));
             }
-            hir::HirStmt::If { cond, then_blk, else_blk, span: _span } => {
+            hir::HirStmt::If {
+                cond,
+                then_blk,
+                else_blk,
+                span: _span,
+            } => {
                 let cond_val = self.lower_expr(cond)?;
                 let pre_if_bb = self.curr_block;
-                
+
                 let then_bb = self.fn_ir.add_block();
                 let else_bb = self.fn_ir.add_block();
                 let join_bb = self.fn_ir.add_block();
-                
-                self.terminate(Terminator::If { cond: cond_val, then_bb, else_bb });
-                
+
+                self.terminate(Terminator::If {
+                    cond: cond_val,
+                    then_bb,
+                    else_bb,
+                });
+
                 // Then branch
                 self.add_pred(then_bb, pre_if_bb);
                 self.curr_block = then_bb;
@@ -393,7 +437,7 @@ impl MirLowerer {
                     self.add_pred(join_bb, self.curr_block);
                     self.terminate(Terminator::Goto(join_bb));
                 }
-                
+
                 // Else branch
                 self.add_pred(else_bb, pre_if_bb);
                 self.curr_block = else_bb;
@@ -404,22 +448,30 @@ impl MirLowerer {
                     self.add_pred(join_bb, self.curr_block);
                     self.terminate(Terminator::Goto(join_bb));
                 }
-                
+
                 self.curr_block = join_bb;
                 self.seal_block(join_bb)?;
             }
-            hir::HirStmt::While { cond, body, span: _span } => {
+            hir::HirStmt::While {
+                cond,
+                body,
+                span: _span,
+            } => {
                 let header_bb = self.fn_ir.add_block();
                 let body_bb = self.fn_ir.add_block();
                 let exit_bb = self.fn_ir.add_block();
-                
+
                 self.add_pred(header_bb, self.curr_block);
                 self.terminate(Terminator::Goto(header_bb));
-                
+
                 self.curr_block = header_bb;
                 let cond_val = self.lower_expr(cond)?;
-                self.terminate(Terminator::If { cond: cond_val, then_bb: body_bb, else_bb: exit_bb });
-                
+                self.terminate(Terminator::If {
+                    cond: cond_val,
+                    then_bb: body_bb,
+                    else_bb: exit_bb,
+                });
+
                 self.add_pred(body_bb, header_bb);
                 self.curr_block = body_bb;
                 self.loop_stack.push(LoopTargets {
@@ -438,7 +490,7 @@ impl MirLowerer {
                     self.add_pred(header_bb, self.curr_block);
                     self.terminate(Terminator::Goto(header_bb));
                 }
-                
+
                 self.seal_block(header_bb)?;
                 self.add_pred(exit_bb, header_bb);
                 self.curr_block = exit_bb;
@@ -452,15 +504,13 @@ impl MirLowerer {
                     self.add_pred(targets.break_bb, self.curr_block);
                     self.terminate_and_detach(Terminator::Goto(targets.break_bb));
                 } else {
-                    return Err(
-                        crate::error::RRException::new(
-                            "RR.SemanticError",
-                            crate::error::RRCode::E1002,
-                            crate::error::Stage::Mir,
-                            "break used outside of a loop".to_string(),
-                        )
-                        .at(span),
-                    );
+                    return Err(crate::error::RRException::new(
+                        "RR.SemanticError",
+                        crate::error::RRCode::E1002,
+                        crate::error::Stage::Mir,
+                        "break used outside of a loop".to_string(),
+                    )
+                    .at(span));
                 }
             }
             hir::HirStmt::Next { span } => {
@@ -480,21 +530,19 @@ impl MirLowerer {
                     self.add_pred(targets.continue_bb, self.curr_block);
                     self.terminate_and_detach(Terminator::Goto(targets.continue_bb));
                 } else {
-                    return Err(
-                        crate::error::RRException::new(
-                            "RR.SemanticError",
-                            crate::error::RRCode::E1002,
-                            crate::error::Stage::Mir,
-                            "next used outside of a loop".to_string(),
-                        )
-                        .at(span),
-                    );
+                    return Err(crate::error::RRException::new(
+                        "RR.SemanticError",
+                        crate::error::RRCode::E1002,
+                        crate::error::Stage::Mir,
+                        "next used outside of a loop".to_string(),
+                    )
+                    .at(span));
                 }
             }
         }
         Ok(())
     }
-    
+
     fn lower_expr(&mut self, expr: hir::HirExpr) -> RR<ValueId> {
         // println!("DEBUG: Lowering Expr: {:?}", expr);
         match expr {
@@ -509,9 +557,7 @@ impl MirLowerer {
                 };
                 Ok(self.add_value(ValueKind::Const(al), Span::default()))
             }
-            hir::HirExpr::Local(l) => {
-                self.read_var(l, self.curr_block)
-            }
+            hir::HirExpr::Local(l) => self.read_var(l, self.curr_block),
             hir::HirExpr::Global(sym) => {
                 let raw_name = self
                     .symbols
@@ -550,7 +596,8 @@ impl MirLowerer {
                     .get(&name)
                     .cloned()
                     .unwrap_or_else(|| format!("field_{}", name.0));
-                let field_lit = self.add_value(ValueKind::Const(Lit::Str(field_name)), Span::default());
+                let field_lit =
+                    self.add_value(ValueKind::Const(Lit::Str(field_name)), Span::default());
                 Ok(self.add_value(
                     ValueKind::Call {
                         callee: "rr_field_get".to_string(),
@@ -569,13 +616,22 @@ impl MirLowerer {
                 }
                 match ids.as_slice() {
                     [idx] => Ok(self.fn_ir.add_value(
-                        ValueKind::Index1D { base: base_id, idx: *idx, is_safe: false, is_na_safe: false },
+                        ValueKind::Index1D {
+                            base: base_id,
+                            idx: *idx,
+                            is_safe: false,
+                            is_na_safe: false,
+                        },
                         span,
                         Facts::empty(),
                         None,
                     )),
                     [r, c] => Ok(self.fn_ir.add_value(
-                        ValueKind::Index2D { base: base_id, r: *r, c: *c },
+                        ValueKind::Index2D {
+                            base: base_id,
+                            r: *r,
+                            c: *c,
+                        },
                         span,
                         Facts::empty(),
                         None,
@@ -589,7 +645,7 @@ impl MirLowerer {
                 }
             }
             hir::HirExpr::Block(blk) => self.lower_block(blk),
-            
+
             hir::HirExpr::Call(hir::HirCall { callee, args, span }) => {
                 let mut v_args = Vec::new();
                 let mut arg_names: Vec<Option<String>> = Vec::new();
@@ -610,21 +666,23 @@ impl MirLowerer {
                         }
                     }
                 }
-                
+
                 match callee.as_ref() {
                     hir::HirExpr::Global(sym) => {
                         if let Some(name) = self.symbols.get(sym) {
                             if name == "length" {
                                 if v_args.len() != 1 {
-                                    return Err(
-                                        crate::error::RRException::new(
-                                            "RR.SemanticError",
-                                            crate::error::RRCode::E1002,
-                                            crate::error::Stage::Mir,
-                                            format!("builtin '{}' expects 1 argument, got {}", name, v_args.len()),
-                                        )
-                                        .at(span),
-                                    );
+                                    return Err(crate::error::RRException::new(
+                                        "RR.SemanticError",
+                                        crate::error::RRCode::E1002,
+                                        crate::error::Stage::Mir,
+                                        format!(
+                                            "builtin '{}' expects 1 argument, got {}",
+                                            name,
+                                            v_args.len()
+                                        ),
+                                    )
+                                    .at(span));
                                 }
                                 return Ok(self.add_value(ValueKind::Len { base: v_args[0] }, span));
                             }
@@ -643,12 +701,45 @@ impl MirLowerer {
                             // Known builtins should keep their original names.
                             if matches!(
                                 name.as_str(),
-                                "seq_along" | "seq_len" | "c" | "list" | "sum" | "mean" | "min" | "max" |
-                                "abs" | "sqrt" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" |
-                                "atan2" | "sinh" | "cosh" | "tanh" | "log" | "log10" | "log2" | "exp" |
-                                "sign" | "gamma" | "lgamma" |
-                                "floor" | "ceiling" | "trunc" | "round" | "pmax" | "pmin" | "print" |
-                                "matrix" | "colSums" | "rowSums" | "crossprod" | "tcrossprod"
+                                "seq_along"
+                                    | "seq_len"
+                                    | "c"
+                                    | "list"
+                                    | "sum"
+                                    | "mean"
+                                    | "min"
+                                    | "max"
+                                    | "abs"
+                                    | "sqrt"
+                                    | "sin"
+                                    | "cos"
+                                    | "tan"
+                                    | "asin"
+                                    | "acos"
+                                    | "atan"
+                                    | "atan2"
+                                    | "sinh"
+                                    | "cosh"
+                                    | "tanh"
+                                    | "log"
+                                    | "log10"
+                                    | "log2"
+                                    | "exp"
+                                    | "sign"
+                                    | "gamma"
+                                    | "lgamma"
+                                    | "floor"
+                                    | "ceiling"
+                                    | "trunc"
+                                    | "round"
+                                    | "pmax"
+                                    | "pmin"
+                                    | "print"
+                                    | "matrix"
+                                    | "colSums"
+                                    | "rowSums"
+                                    | "crossprod"
+                                    | "tcrossprod"
                             ) {
                                 return Ok(self.fn_ir.add_value(
                                     ValueKind::Call {
@@ -662,7 +753,8 @@ impl MirLowerer {
                                 ));
                             }
                             if Self::is_dynamic_fallback_builtin(name) {
-                                self.fn_ir.mark_unsupported_dynamic(format!("dynamic builtin: {}", name));
+                                self.fn_ir
+                                    .mark_unsupported_dynamic(format!("dynamic builtin: {}", name));
                                 return Ok(self.fn_ir.add_value(
                                     ValueKind::Call {
                                         callee: name.clone(),
@@ -676,18 +768,18 @@ impl MirLowerer {
                             }
                             if let Some(expected) = self.known_functions.get(name) {
                                 if *expected != v_args.len() {
-                                    return Err(
-                                        crate::error::RRException::new(
-                                            "RR.SemanticError",
-                                            crate::error::RRCode::E1002,
-                                            crate::error::Stage::Mir,
-                                            format!(
-                                                "function '{}' expects {} argument(s), got {}",
-                                                name, expected, v_args.len()
-                                            ),
-                                        )
-                                        .at(span),
-                                    );
+                                    return Err(crate::error::RRException::new(
+                                        "RR.SemanticError",
+                                        crate::error::RRCode::E1002,
+                                        crate::error::Stage::Mir,
+                                        format!(
+                                            "function '{}' expects {} argument(s), got {}",
+                                            name,
+                                            expected,
+                                            v_args.len()
+                                        ),
+                                    )
+                                    .at(span));
                                 }
                                 return Ok(self.fn_ir.add_value(
                                     ValueKind::Call {
@@ -700,27 +792,23 @@ impl MirLowerer {
                                     None,
                                 ));
                             }
-                            return Err(
-                                crate::error::RRException::new(
-                                    "RR.SemanticError",
-                                    crate::error::RRCode::E1001,
-                                    crate::error::Stage::Mir,
-                                    format!("undefined function '{}'", name),
-                                )
-                                .at(span)
-                                .note("Define or import the function before calling it."),
-                            );
-                        }
-                        return Err(
-                            crate::error::RRException::new(
+                            return Err(crate::error::RRException::new(
                                 "RR.SemanticError",
                                 crate::error::RRCode::E1001,
                                 crate::error::Stage::Mir,
-                                "invalid unresolved callee symbol".to_string(),
+                                format!("undefined function '{}'", name),
                             )
-                            .at(span),
-                        );
-                    },
+                            .at(span)
+                            .note("Define or import the function before calling it."));
+                        }
+                        return Err(crate::error::RRException::new(
+                            "RR.SemanticError",
+                            crate::error::RRCode::E1001,
+                            crate::error::Stage::Mir,
+                            "invalid unresolved callee symbol".to_string(),
+                        )
+                        .at(span));
+                    }
                     _ => {
                         let callee_val = self.lower_expr(callee.as_ref().clone())?;
                         let mut dyn_args = Vec::with_capacity(v_args.len() + 1);
@@ -742,18 +830,26 @@ impl MirLowerer {
                     }
                 }
             }
-            hir::HirExpr::IfExpr { cond, then_expr, else_expr } => {
+            hir::HirExpr::IfExpr {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
                 let cond_val = self.lower_expr(*cond)?;
-                
+
                 let then_bb = self.fn_ir.add_block();
                 let else_bb = self.fn_ir.add_block();
                 let merge_bb = self.fn_ir.add_block();
-                
+
                 self.add_pred(then_bb, self.curr_block);
                 self.add_pred(else_bb, self.curr_block);
-                
-                self.terminate(Terminator::If { cond: cond_val, then_bb, else_bb });
-                
+
+                self.terminate(Terminator::If {
+                    cond: cond_val,
+                    then_bb,
+                    else_bb,
+                });
+
                 // Then Branch
                 self.curr_block = then_bb;
                 // Seal Then? Only 1 pred.
@@ -764,7 +860,7 @@ impl MirLowerer {
                     self.terminate(Terminator::Goto(merge_bb));
                 }
                 let then_end_bb = self.curr_block;
-            
+
                 // Else Branch
                 self.curr_block = else_bb;
                 self.seal_block(else_bb)?;
@@ -774,49 +870,65 @@ impl MirLowerer {
                     self.terminate(Terminator::Goto(merge_bb));
                 }
                 let else_end_bb = self.curr_block;
-            
+
                 // Merge Branch
                 self.curr_block = merge_bb;
                 self.seal_block(merge_bb)?;
-                
+
                 // Phi for result value
-                let phi_val = self.add_value(ValueKind::Phi { 
-                    args: vec![(then_val, then_end_bb), (else_val, else_end_bb)] 
-                }, Span::default());
+                let phi_val = self.add_value(
+                    ValueKind::Phi {
+                        args: vec![(then_val, then_end_bb), (else_val, else_end_bb)],
+                    },
+                    Span::default(),
+                );
                 if let Some(v) = self.fn_ir.values.get_mut(phi_val) {
                     v.phi_block = Some(merge_bb);
                 }
-                
+
                 Ok(phi_val)
             }
             hir::HirExpr::VectorLit(elems) => {
-                 let mut vals = Vec::new();
-                 for e in elems { vals.push(self.lower_expr(e)?); }
-                 // Lower vector literals via R's `c(...)` constructor.
-                 let names = vec![None; vals.len()];
-                 Ok(self.add_value(ValueKind::Call { callee: "c".to_string(), args: vals, names }, Span::default()))
+                let mut vals = Vec::new();
+                for e in elems {
+                    vals.push(self.lower_expr(e)?);
+                }
+                // Lower vector literals via R's `c(...)` constructor.
+                let names = vec![None; vals.len()];
+                Ok(self.add_value(
+                    ValueKind::Call {
+                        callee: "c".to_string(),
+                        args: vals,
+                        names,
+                    },
+                    Span::default(),
+                ))
             }
-             hir::HirExpr::ListLit(fields) => {
-                 // Preserve names via a runtime helper:
-                 // rr_named_list("a", v1, "b", v2, ...)
-                 let mut vals = Vec::new();
-                 for (sym, e) in fields {
-                     let key = self
-                         .symbols
-                         .get(&sym)
-                         .cloned()
-                         .unwrap_or_else(|| format!("field_{}", sym.0));
-                     let k = self.add_value(ValueKind::Const(Lit::Str(key)), Span::default());
-                     vals.push(k);
-                     vals.push(self.lower_expr(e)?);
-                 }
-                 let names = vec![None; vals.len()];
-                 Ok(self.add_value(
-                     ValueKind::Call { callee: "rr_named_list".to_string(), args: vals, names },
-                     Span::default(),
-                 ))
+            hir::HirExpr::ListLit(fields) => {
+                // Preserve names via a runtime helper:
+                // rr_named_list("a", v1, "b", v2, ...)
+                let mut vals = Vec::new();
+                for (sym, e) in fields {
+                    let key = self
+                        .symbols
+                        .get(&sym)
+                        .cloned()
+                        .unwrap_or_else(|| format!("field_{}", sym.0));
+                    let k = self.add_value(ValueKind::Const(Lit::Str(key)), Span::default());
+                    vals.push(k);
+                    vals.push(self.lower_expr(e)?);
+                }
+                let names = vec![None; vals.len()];
+                Ok(self.add_value(
+                    ValueKind::Call {
+                        callee: "rr_named_list".to_string(),
+                        args: vals,
+                        names,
+                    },
+                    Span::default(),
+                ))
             }
-             hir::HirExpr::Range { start, end } => {
+            hir::HirExpr::Range { start, end } => {
                 let s = self.lower_expr(*start)?;
                 let e = self.lower_expr(*end)?;
                 Ok(self.add_value(ValueKind::Range { start: s, end: e }, Span::default()))
@@ -826,37 +938,31 @@ impl MirLowerer {
                 // Runtime error propagation is still handled by R semantics.
                 self.lower_expr(*inner)
             }
-            hir::HirExpr::Match { scrut, arms } => {
-                self.lower_match_expr(*scrut, arms)
-            }
+            hir::HirExpr::Match { scrut, arms } => self.lower_match_expr(*scrut, arms),
             hir::HirExpr::Column(name) => {
-                 // Tidy Column -> Constant String
-                 // We rely on runtime to distinguish column ref vs string if needed.
-                 // But typically @col evaluates to the string "col".
-                 Ok(self.add_value(ValueKind::Const(Lit::Str(name)), Span::default()))
+                // Tidy Column -> Constant String
+                // We rely on runtime to distinguish column ref vs string if needed.
+                // But typically @col evaluates to the string "col".
+                Ok(self.add_value(ValueKind::Const(Lit::Str(name)), Span::default()))
             }
-            hir::HirExpr::Unquote(e) => {
-                self.lower_expr(*e)
-            }
-            _ => Err(
-                crate::error::RRException::new(
-                    "RR.SemanticError",
-                    crate::error::RRCode::E1002,
-                    crate::error::Stage::Mir,
-                    format!("unsupported expression in MIR lowering: {:?}", expr),
-                )
-                .at(Span::default())
-                .push_frame("mir::lower_hir::lower_expr/1", Some(Span::default())),
-            ),
+            hir::HirExpr::Unquote(e) => self.lower_expr(*e),
+            _ => Err(crate::error::RRException::new(
+                "RR.SemanticError",
+                crate::error::RRCode::E1002,
+                crate::error::Stage::Mir,
+                format!("unsupported expression in MIR lowering: {:?}", expr),
+            )
+            .at(Span::default())
+            .push_frame("mir::lower_hir::lower_expr/1", Some(Span::default()))),
         }
     }
-    
+
     // Helpers
-    
+
     fn add_void_val(&mut self, span: Span) -> ValueId {
         self.add_value(ValueKind::Const(Lit::Null), span)
     }
-    
+
     fn add_null_val(&mut self, span: Span) -> ValueId {
         self.add_value(ValueKind::Const(Lit::Null), span)
     }
@@ -903,15 +1009,15 @@ impl MirLowerer {
         }
         self.curr_block = dead_bb;
     }
-    
+
     fn terminate(&mut self, term: Terminator) {
         self.fn_ir.blocks[self.curr_block].term = term;
     }
-    
+
     fn is_terminated(&self, b: BlockId) -> bool {
         !matches!(self.fn_ir.blocks[b].term, Terminator::Unreachable)
     }
-    
+
     fn map_binop(&self, op: hir::HirBinOp) -> BinOp {
         match op {
             hir::HirBinOp::Add => BinOp::Add,
@@ -951,7 +1057,11 @@ impl MirLowerer {
         )
     }
 
-    fn lower_match_expr(&mut self, scrut: hir::HirExpr, arms: Vec<hir::HirMatchArm>) -> RR<ValueId> {
+    fn lower_match_expr(
+        &mut self,
+        scrut: hir::HirExpr,
+        arms: Vec<hir::HirMatchArm>,
+    ) -> RR<ValueId> {
         let span = Span::default();
         let scrut_val = self.lower_expr(scrut)?;
         if arms.is_empty() {
@@ -972,7 +1082,11 @@ impl MirLowerer {
 
             if let Some(guard_expr) = arm.guard {
                 let guard_bb = self.fn_ir.add_block();
-                self.terminate(Terminator::If { cond, then_bb: guard_bb, else_bb: fail_bb });
+                self.terminate(Terminator::If {
+                    cond,
+                    then_bb: guard_bb,
+                    else_bb: fail_bb,
+                });
                 self.add_pred(guard_bb, test_bb);
                 self.add_pred(fail_bb, test_bb);
 
@@ -980,11 +1094,19 @@ impl MirLowerer {
                 self.seal_block(guard_bb)?;
                 self.bind_match_pattern(scrut_val, &arm.pat, arm.span)?;
                 let guard_val = self.lower_expr(guard_expr)?;
-                self.terminate(Terminator::If { cond: guard_val, then_bb: arm_bb, else_bb: fail_bb });
+                self.terminate(Terminator::If {
+                    cond: guard_val,
+                    then_bb: arm_bb,
+                    else_bb: fail_bb,
+                });
                 self.add_pred(arm_bb, guard_bb);
                 self.add_pred(fail_bb, guard_bb);
             } else {
-                self.terminate(Terminator::If { cond, then_bb: arm_bb, else_bb: fail_bb });
+                self.terminate(Terminator::If {
+                    cond,
+                    then_bb: arm_bb,
+                    else_bb: fail_bb,
+                });
                 self.add_pred(arm_bb, test_bb);
                 self.add_pred(fail_bb, test_bb);
             }
@@ -1028,14 +1150,24 @@ impl MirLowerer {
         Ok(phi)
     }
 
-    fn lower_match_pat_cond(&mut self, scrut: ValueId, pat: &hir::HirPat, span: Span) -> RR<ValueId> {
+    fn lower_match_pat_cond(
+        &mut self,
+        scrut: ValueId,
+        pat: &hir::HirPat,
+        span: Span,
+    ) -> RR<ValueId> {
         match pat {
-            hir::HirPat::Wild | hir::HirPat::Bind { .. } => {
-                Ok(self.add_bool_val(true, span))
-            }
+            hir::HirPat::Wild | hir::HirPat::Bind { .. } => Ok(self.add_bool_val(true, span)),
             hir::HirPat::Lit(l) => {
                 let rhs = self.add_value(ValueKind::Const(Self::hir_lit_to_lit(l)), span);
-                Ok(self.add_value(ValueKind::Binary { op: BinOp::Eq, lhs: scrut, rhs }, span))
+                Ok(self.add_value(
+                    ValueKind::Binary {
+                        op: BinOp::Eq,
+                        lhs: scrut,
+                        rhs,
+                    },
+                    span,
+                ))
             }
             hir::HirPat::Or(pats) => {
                 if pats.is_empty() {
@@ -1077,11 +1209,14 @@ impl MirLowerer {
                 let mut cond = self.add_bool_val(true, span);
                 for (field, subpat) in fields {
                     let field_name = self.symbol_name(*field);
-                    let field_name_val = self.add_value(ValueKind::Const(Lit::Str(field_name)), span);
-                    let exists = self.add_call_value("rr_field_exists", vec![scrut, field_name_val], span);
+                    let field_name_val =
+                        self.add_value(ValueKind::Const(Lit::Str(field_name)), span);
+                    let exists =
+                        self.add_call_value("rr_field_exists", vec![scrut, field_name_val], span);
                     cond = self.add_bin_bool(BinOp::And, cond, exists, span);
 
-                    let field_val = self.add_call_value("rr_field_get", vec![scrut, field_name_val], span);
+                    let field_val =
+                        self.add_call_value("rr_field_get", vec![scrut, field_name_val], span);
                     let field_cond = self.lower_match_pat_cond(field_val, subpat, span)?;
                     cond = self.add_bin_bool(BinOp::And, cond, field_cond, span);
                 }
@@ -1121,8 +1256,10 @@ impl MirLowerer {
             hir::HirPat::Record { fields } => {
                 for (field, subpat) in fields {
                     let field_name = self.symbol_name(*field);
-                    let field_name_val = self.add_value(ValueKind::Const(Lit::Str(field_name)), span);
-                    let field_val = self.add_call_value("rr_field_get", vec![scrut, field_name_val], span);
+                    let field_name_val =
+                        self.add_value(ValueKind::Const(Lit::Str(field_name)), span);
+                    let field_val =
+                        self.add_call_value("rr_field_get", vec![scrut, field_name_val], span);
                     self.bind_match_pattern(field_val, subpat, span)?;
                 }
                 Ok(())
@@ -1140,12 +1277,12 @@ impl MirLowerer {
             hir::HirLit::Null => Lit::Null,
         }
     }
-    
+
     fn lower_for(&mut self, iter: hir::HirForIter, body: hir::HirBlock, span: Span) -> RR<()> {
         let (var, start_id, end_id) = match iter {
-            hir::HirForIter::Range { var, start, end, .. } => {
-                (var, self.lower_expr(start)?, self.lower_expr(end)?)
-            }
+            hir::HirForIter::Range {
+                var, start, end, ..
+            } => (var, self.lower_expr(start)?, self.lower_expr(end)?),
             hir::HirForIter::SeqAlong { var, xs } => {
                 // If xs is a Range, extract start/end
                 if let hir::HirExpr::Range { start, end } = xs {
@@ -1164,20 +1301,33 @@ impl MirLowerer {
             }
         };
         let pre_bb = self.curr_block;
-        
+
         let header_bb = self.fn_ir.add_block();
         let body_bb = self.fn_ir.add_block();
         let exit_bb = self.fn_ir.add_block();
-        
+
         self.write_var(var, start_id);
         self.add_pred(header_bb, pre_bb);
         self.terminate(Terminator::Goto(header_bb));
 
         self.curr_block = header_bb;
         let iv = self.read_var(var, header_bb)?;
-        let cond = self.fn_ir.add_value(ValueKind::Binary { op: BinOp::Le, lhs: iv, rhs: end_id }, span, Facts::empty(), None);
-        self.terminate(Terminator::If { cond, then_bb: body_bb, else_bb: exit_bb });
-        
+        let cond = self.fn_ir.add_value(
+            ValueKind::Binary {
+                op: BinOp::Le,
+                lhs: iv,
+                rhs: end_id,
+            },
+            span,
+            Facts::empty(),
+            None,
+        );
+        self.terminate(Terminator::If {
+            cond,
+            then_bb: body_bb,
+            else_bb: exit_bb,
+        });
+
         self.add_pred(body_bb, header_bb);
         self.seal_block(body_bb)?; // Body is dominated by header, so we can seal immediately
         self.curr_block = body_bb;
@@ -1188,25 +1338,36 @@ impl MirLowerer {
         });
         self.lower_block(body)?;
         self.loop_stack.pop();
-        
+
         let curr_reachable = self
             .preds
             .get(&self.curr_block)
             .map(|ps| !ps.is_empty())
             .unwrap_or(false);
         if !self.is_terminated(self.curr_block) && curr_reachable {
-            let one = self.fn_ir.add_value(ValueKind::Const(Lit::Int(1)), span, Facts::empty(), None);
-            let next_iv = self.fn_ir.add_value(ValueKind::Binary { op: BinOp::Add, lhs: iv, rhs: one }, span, Facts::empty(), None);
+            let one =
+                self.fn_ir
+                    .add_value(ValueKind::Const(Lit::Int(1)), span, Facts::empty(), None);
+            let next_iv = self.fn_ir.add_value(
+                ValueKind::Binary {
+                    op: BinOp::Add,
+                    lhs: iv,
+                    rhs: one,
+                },
+                span,
+                Facts::empty(),
+                None,
+            );
             self.write_var(var, next_iv);
             self.add_pred(header_bb, self.curr_block);
             self.terminate(Terminator::Goto(header_bb));
         }
-        
+
         self.seal_block(header_bb)?;
         self.add_pred(exit_bb, header_bb);
         self.curr_block = exit_bb;
         self.seal_block(exit_bb)?;
-        
+
         Ok(())
     }
 }

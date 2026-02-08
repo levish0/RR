@@ -1,9 +1,8 @@
-﻿
-use crate::mir::*;
-use crate::mir::analyze::range::{analyze_ranges, ensure_value_range, transfer_instr};
-use crate::mir::analyze::range::{RangeInterval, SymbolicBound};
 use crate::mir::analyze::na::{self, NaState};
+use crate::mir::analyze::range::{RangeInterval, SymbolicBound};
+use crate::mir::analyze::range::{analyze_ranges, ensure_value_range, transfer_instr};
 use crate::mir::opt::loop_analysis::LoopAnalyzer;
+use crate::mir::*;
 use std::collections::HashSet;
 
 #[derive(Clone)]
@@ -24,7 +23,7 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
     for bid in 0..fn_ir.blocks.len() {
         let mut cur_facts = bb_facts[bid].clone();
         let num_instrs = fn_ir.blocks[bid].instrs.len();
-        
+
         for i in 0..num_instrs {
             let (in_bounds, non_na) = {
                 let instr = &fn_ir.blocks[bid].instrs[i];
@@ -33,15 +32,19 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
                     let iv_proven = iv_exact_in_block(bid, *idx, &canonical_ivs, fn_ir);
                     let idx_intv = cur_facts.get(*idx);
                     let in_bounds = interval_proves_in_bounds(fn_ir, &idx_intv, *base) || iv_proven;
-                    let non_na = matches!(na_states[*idx], NaState::Never)
-                        || iv_proven;
+                    let non_na = matches!(na_states[*idx], NaState::Never) || iv_proven;
                     (in_bounds, non_na)
                 } else {
                     (false, false)
                 }
             };
 
-            if let Instr::StoreIndex1D { ref mut is_safe, ref mut is_na_safe, .. } = fn_ir.blocks[bid].instrs[i] {
+            if let Instr::StoreIndex1D {
+                ref mut is_safe,
+                ref mut is_na_safe,
+                ..
+            } = fn_ir.blocks[bid].instrs[i]
+            {
                 if in_bounds && !*is_safe {
                     *is_safe = true;
                     changed = true;
@@ -51,7 +54,7 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
                     changed = true;
                 }
             }
-            
+
             // Re-borrow for transfer
             let values = &fn_ir.values;
             let instr = &fn_ir.blocks[bid].instrs[i];
@@ -116,7 +119,9 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
                         &mut seen,
                     );
                 }
-                Instr::StoreIndex2D { base, r, c, val, .. } => {
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => {
                     let mut seen = HashSet::new();
                     collect_index_safety(
                         *base,
@@ -169,7 +174,10 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
     }
 
     for vid in safe_values {
-        if let ValueKind::Index1D { ref mut is_safe, .. } = fn_ir.values[vid].kind {
+        if let ValueKind::Index1D {
+            ref mut is_safe, ..
+        } = fn_ir.values[vid].kind
+        {
             if !*is_safe {
                 *is_safe = true;
                 changed = true;
@@ -178,7 +186,10 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
     }
 
     for vid in non_na_values {
-        if let ValueKind::Index1D { ref mut is_na_safe, .. } = fn_ir.values[vid].kind {
+        if let ValueKind::Index1D {
+            ref mut is_na_safe, ..
+        } = fn_ir.values[vid].kind
+        {
             if !*is_na_safe {
                 *is_na_safe = true;
                 changed = true;
@@ -196,11 +207,12 @@ fn canonical_loop_ivs(fn_ir: &FnIR) -> Vec<CanonicalIvRule> {
             Some(iv) => iv,
             None => continue,
         };
-        let init_is_one = matches!(fn_ir.values[iv.init_val].kind, ValueKind::Const(Lit::Int(1)));
-        let canonical = init_is_one
-            && iv.step == 1
-            && iv.step_op == BinOp::Add
-            && lp.is_seq_len.is_some();
+        let init_is_one = matches!(
+            fn_ir.values[iv.init_val].kind,
+            ValueKind::Const(Lit::Int(1))
+        );
+        let canonical =
+            init_is_one && iv.step == 1 && iv.step_op == BinOp::Add && lp.is_seq_len.is_some();
         if canonical {
             let limit = lp.limit.and_then(|v| extract_len_limit(fn_ir, v));
             out.push(CanonicalIvRule {
@@ -216,7 +228,11 @@ fn canonical_loop_ivs(fn_ir: &FnIR) -> Vec<CanonicalIvRule> {
 fn extract_len_limit(fn_ir: &FnIR, limit_val: ValueId) -> Option<(ValueId, i64)> {
     match &fn_ir.values[limit_val].kind {
         ValueKind::Len { base } => Some((*base, 0)),
-        ValueKind::Binary { op: BinOp::Sub, lhs, rhs } => {
+        ValueKind::Binary {
+            op: BinOp::Sub,
+            lhs,
+            rhs,
+        } => {
             if let ValueKind::Len { base } = fn_ir.values[*lhs].kind {
                 if let Some(k) = const_int(fn_ir, *rhs) {
                     return Some((base, -k));
@@ -224,7 +240,11 @@ fn extract_len_limit(fn_ir: &FnIR, limit_val: ValueId) -> Option<(ValueId, i64)>
             }
             None
         }
-        ValueKind::Binary { op: BinOp::Add, lhs, rhs } => {
+        ValueKind::Binary {
+            op: BinOp::Add,
+            lhs,
+            rhs,
+        } => {
             if let ValueKind::Len { base } = fn_ir.values[*lhs].kind {
                 if let Some(k) = const_int(fn_ir, *rhs) {
                     return Some((base, k));
@@ -253,7 +273,11 @@ fn iv_offset_for_idx(fn_ir: &FnIR, idx: ValueId, iv: ValueId) -> Option<i64> {
         return Some(0);
     }
     match &fn_ir.values[idx].kind {
-        ValueKind::Binary { op: BinOp::Add, lhs, rhs } => {
+        ValueKind::Binary {
+            op: BinOp::Add,
+            lhs,
+            rhs,
+        } => {
             if *lhs == iv {
                 return const_int(fn_ir, *rhs);
             }
@@ -262,7 +286,11 @@ fn iv_offset_for_idx(fn_ir: &FnIR, idx: ValueId, iv: ValueId) -> Option<i64> {
             }
             None
         }
-        ValueKind::Binary { op: BinOp::Sub, lhs, rhs } => {
+        ValueKind::Binary {
+            op: BinOp::Sub,
+            lhs,
+            rhs,
+        } => {
             if *lhs == iv {
                 return const_int(fn_ir, *rhs).map(|k| -k);
             }
@@ -358,7 +386,12 @@ fn collect_index_safety(
     }
 
     match &fn_ir.values[vid].kind {
-        ValueKind::Index1D { base, idx, is_safe, is_na_safe } => {
+        ValueKind::Index1D {
+            base,
+            idx,
+            is_safe,
+            is_na_safe,
+        } => {
             ensure_value_range(*idx, &fn_ir.values, facts);
             let iv_proven = iv_in_bounds_for_base(bid, *idx, *base, canonical_ivs, fn_ir);
             let idx_intv = facts.get(*idx);

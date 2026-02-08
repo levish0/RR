@@ -1,18 +1,18 @@
-﻿mod utils;
-mod syntax;
+mod codegen;
+mod error;
 mod hir;
 mod mir;
-mod codegen;
 mod runtime;
-mod error;
+mod syntax;
+mod utils;
 
+use crate::runtime::runner::Runner;
+use crate::syntax::parse::Parser;
 use std::env;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use crate::syntax::parse::Parser;
-use crate::runtime::runner::Runner;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OptLevel {
@@ -89,7 +89,11 @@ impl CliLog {
     }
 
     fn banner(&self, input: &str, level: OptLevel) {
-        println!("{} {}", self.yellow_bold("[+]"), self.red_bold("RR Tachyon v1.0"));
+        println!(
+            "{} {}",
+            self.yellow_bold("[+]"),
+            self.red_bold("RR Tachyon v1.0")
+        );
         println!(
             " {} {}",
             self.dim("└─"),
@@ -115,7 +119,12 @@ impl CliLog {
 
     fn trace(&self, label: &str, detail: &str) {
         if self.detailed {
-            println!("   {} {} {}", self.dim("*"), self.dim(label), self.dim(detail));
+            println!(
+                "   {} {} {}",
+                self.dim("*"),
+                self.dim(label),
+                self.dim(detail)
+            );
         }
     }
 
@@ -250,7 +259,10 @@ fn cmd_legacy(args: &[String]) -> i32 {
     let input = match fs::read_to_string(&input_path) {
         Ok(s) => s,
         Err(e) => {
-            ui.error(&format!("Failed to read input file '{}': {}", input_path, e));
+            ui.error(&format!(
+                "Failed to read input file '{}': {}",
+                input_path, e
+            ));
             return 1;
         }
     };
@@ -260,7 +272,10 @@ fn cmd_legacy(args: &[String]) -> i32 {
         Ok((r_code, source_map)) => {
             if let Some(out_path) = output_path {
                 if let Err(e) = fs::write(&out_path, &r_code) {
-                    ui.error(&format!("Failed to write output file '{}': {}", out_path, e));
+                    ui.error(&format!(
+                        "Failed to write output file '{}': {}",
+                        out_path, e
+                    ));
                     return 1;
                 }
                 ui.success(&format!("Compiled to {}", out_path));
@@ -286,10 +301,7 @@ fn resolve_run_input(raw: &str) -> Result<PathBuf, String> {
         if entry.is_file() {
             Ok(entry)
         } else {
-            Err(format!(
-                "main.rr not found in '{}'",
-                path.to_string_lossy()
-            ))
+            Err(format!("main.rr not found in '{}'", path.to_string_lossy()))
         }
     } else if path.is_file() {
         if path.extension().and_then(|s| s.to_str()) == Some("rr") {
@@ -398,18 +410,22 @@ fn cmd_build(args: &[String]) -> i32 {
 
     let out_root = PathBuf::from(&out_dir);
     if let Err(e) = fs::create_dir_all(&out_root) {
-        ui.error(&format!("Failed to create output directory '{}': {}", out_dir, e));
+        ui.error(&format!(
+            "Failed to create output directory '{}': {}",
+            out_dir, e
+        ));
         return 1;
     }
-    println!(
-        "{} {}",
-        ui.yellow_bold("[+]"),
-        ui.red_bold("RR Build")
-    );
+    println!("{} {}", ui.yellow_bold("[+]"), ui.red_bold("RR Build"));
     println!(
         " {} {}",
         ui.dim("└─"),
-        ui.white_bold(&format!("Target: {} | Out: {} ({})", target, out_dir, opt_level.label()))
+        ui.white_bold(&format!(
+            "Target: {} | Out: {} ({})",
+            target,
+            out_dir,
+            opt_level.label()
+        ))
     );
 
     let mut rr_files = Vec::new();
@@ -481,7 +497,11 @@ fn cmd_build(args: &[String]) -> i32 {
         built += 1;
     }
 
-    ui.success(&format!("Build complete: {} file(s) -> {}", built, out_root.display()));
+    ui.success(&format!(
+        "Build complete: {} file(s) -> {}",
+        built,
+        out_root.display()
+    ));
     0
 }
 
@@ -492,7 +512,12 @@ fn escape_r_string(input: &str) -> String {
         .replace('\n', "\\n")
 }
 
-fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime: bool) -> crate::error::RR<(String, Vec<crate::codegen::mir_emit::MapEntry>)> {
+fn compile(
+    entry_path: &str,
+    entry_input: &str,
+    opt_level: OptLevel,
+    _no_runtime: bool,
+) -> crate::error::RR<(String, Vec<crate::codegen::mir_emit::MapEntry>)> {
     let ui = CliLog::new();
     let compile_started = Instant::now();
     let optimize = opt_level.is_optimized();
@@ -502,15 +527,16 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
         .and_then(|s| s.to_str())
         .unwrap_or(entry_path);
     ui.banner(input_label, opt_level);
-    
+
     // Module Loader State
     let mut loaded_paths = std::collections::HashSet::new();
     let mut queue = std::collections::VecDeque::new();
-    
+
     // Normalize entry path
-    let entry_abs = fs::canonicalize(entry_path).unwrap_or_else(|_| std::path::PathBuf::from(entry_path));
+    let entry_abs =
+        fs::canonicalize(entry_path).unwrap_or_else(|_| std::path::PathBuf::from(entry_path));
     let entry_str = entry_abs.to_string_lossy().to_string();
-    
+
     loaded_paths.insert(entry_str.clone());
     queue.push_back((entry_str, entry_input.to_string(), 0)); // (path, content, mod_id)
 
@@ -518,7 +544,12 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
     let mut next_mod_id = 1;
 
     // 1. & 2. Loading Loop (Parse + Lower)
-    let step_load = ui.step_start(1, TOTAL_STEPS, "Source Analysis", "parse + scope resolution");
+    let step_load = ui.step_start(
+        1,
+        TOTAL_STEPS,
+        "Source Analysis",
+        "parse + scope resolution",
+    );
     let mut hir_modules = Vec::new();
     let mut hir_lowerer = crate::hir::lower::Lowerer::new();
     let mut global_symbols = std::collections::HashMap::new();
@@ -526,7 +557,7 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
 
     while let Some((curr_path_str, content, mod_id)) = queue.pop_front() {
         ui.trace(&format!("module#{}", mod_id), &curr_path_str);
-        
+
         let mut parser = Parser::new(&content);
         let ast_prog = match parser.parse_program() {
             Ok(p) => p,
@@ -535,27 +566,30 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
                 continue;
             }
         };
-        
-        let (hir_mod, symbols) = match hir_lowerer.lower_module(ast_prog, crate::hir::def::ModuleId(mod_id as u32)) {
-            Ok(v) => v,
-            Err(e) => {
-                load_errors.push(e);
-                continue;
-            }
-        };
+
+        let (hir_mod, symbols) =
+            match hir_lowerer.lower_module(ast_prog, crate::hir::def::ModuleId(mod_id as u32)) {
+                Ok(v) => v,
+                Err(e) => {
+                    load_errors.push(e);
+                    continue;
+                }
+            };
         for w in hir_lowerer.take_warnings() {
             ui.warn(&format!("{}: {}", curr_path_str, w));
         }
         global_symbols.extend(symbols);
-        
+
         // Scan for imports
         for item in &hir_mod.items {
             if let crate::hir::def::HirItem::Import(imp) = item {
                 // Resolve path (imp.module is String)
                 let import_path = &imp.module;
-                let curr_dir = std::path::Path::new(&curr_path_str).parent().unwrap_or(std::path::Path::new("."));
+                let curr_dir = std::path::Path::new(&curr_path_str)
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."));
                 let target = curr_dir.join(import_path);
-                
+
                 // Simple cycle detection / deduplication
                 let target_lossy = target.to_string_lossy().to_string();
                 if !loaded_paths.contains(&target_lossy) {
@@ -565,9 +599,12 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
                             loaded_paths.insert(target_lossy.clone());
                             queue.push_back((target_lossy, content, next_mod_id));
                             next_mod_id += 1;
-                        },
+                        }
                         Err(e) => {
-                            ui.error(&format!("Failed to load imported module '{}': {}", target_lossy, e));
+                            ui.error(&format!(
+                                "Failed to load imported module '{}': {}",
+                                target_lossy, e
+                            ));
                             std::process::exit(1);
                         }
                     }
@@ -593,11 +630,18 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
         hir_modules.len(),
         format_duration(step_load.elapsed())
     ));
-    
-    let hir_prog = crate::hir::def::HirProgram { modules: hir_modules };
+
+    let hir_prog = crate::hir::def::HirProgram {
+        modules: hir_modules,
+    };
 
     // 3. Desugar
-    let step_desugar = ui.step_start(2, TOTAL_STEPS, "Canonicalization", "normalize HIR structure");
+    let step_desugar = ui.step_start(
+        2,
+        TOTAL_STEPS,
+        "Canonicalization",
+        "normalize HIR structure",
+    );
     let mut desugarer = crate::hir::desugar::Desugarer::new();
     let desugared_hir = desugarer.desugar_program(hir_prog)?;
     ui.step_line_ok(&format!(
@@ -610,11 +654,17 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
     let mut final_source_map = Vec::new();
 
     // 4. MIR Lowering
-    let step_ssa = ui.step_start(3, TOTAL_STEPS, "SSA Graph Synthesis", "build dominator tree & phi nodes");
+    let step_ssa = ui.step_start(
+        3,
+        TOTAL_STEPS,
+        "SSA Graph Synthesis",
+        "build dominator tree & phi nodes",
+    );
     let mut all_fns = std::collections::HashMap::new();
     let mut emit_order: Vec<String> = Vec::new();
     let mut top_level_calls: Vec<String> = Vec::new();
-    let mut known_fn_arities: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut known_fn_arities: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     for module in &desugared_hir.modules {
         for item in &module.items {
@@ -625,16 +675,25 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
             }
         }
     }
-    
+
     for module in desugared_hir.modules {
         let mut top_level_stmts: Vec<crate::hir::def::HirStmt> = Vec::new();
 
         for item in module.items {
             match item {
                 crate::hir::def::HirItem::Fn(f) => {
-                    let fn_name = format!("Sym_{}", f.name.0); 
-                    let params: Vec<String> = f.params.iter().map(|p| global_symbols[&p.name].clone()).collect(); 
-                    let var_names = f.local_names.clone().into_iter().map(|(id, name)| (id, name)).collect();
+                    let fn_name = format!("Sym_{}", f.name.0);
+                    let params: Vec<String> = f
+                        .params
+                        .iter()
+                        .map(|p| global_symbols[&p.name].clone())
+                        .collect();
+                    let var_names = f
+                        .local_names
+                        .clone()
+                        .into_iter()
+                        .map(|(id, name)| (id, name))
+                        .collect();
 
                     let lowerer = crate::mir::lower_hir::MirLowerer::new(
                         fn_name.clone(),
@@ -663,8 +722,14 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
                 params: Vec::new(),
                 has_varargs: false,
                 ret_ty: None,
-                body: crate::hir::def::HirBlock { stmts: top_level_stmts, span: crate::utils::Span::default() },
-                attrs: crate::hir::def::HirFnAttrs { inline_hint: crate::hir::def::InlineHint::Never, tidy_safe: false },
+                body: crate::hir::def::HirBlock {
+                    stmts: top_level_stmts,
+                    span: crate::utils::Span::default(),
+                },
+                attrs: crate::hir::def::HirFnAttrs {
+                    inline_hint: crate::hir::def::InlineHint::Never,
+                    tidy_safe: false,
+                },
                 span: crate::utils::Span::default(),
                 local_names: std::collections::HashMap::new(),
                 public: false,
@@ -698,13 +763,24 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
     let step_opt = ui.step_start(
         4,
         TOTAL_STEPS,
-        if optimize { "Tachyon Optimization" } else { "Tachyon Stabilization" },
-        if optimize { "execute aggressive passes" } else { "execute safe stabilization passes" },
+        if optimize {
+            "Tachyon Optimization"
+        } else {
+            "Tachyon Stabilization"
+        },
+        if optimize {
+            "execute aggressive passes"
+        } else {
+            "execute safe stabilization passes"
+        },
     );
     for fn_ir in all_fns.values() {
         if fn_ir.unsupported_dynamic {
             if fn_ir.fallback_reasons.is_empty() {
-                ui.warn(&format!("Hybrid fallback enabled for {} (dynamic feature)", fn_ir.name));
+                ui.warn(&format!(
+                    "Hybrid fallback enabled for {} (dynamic feature)",
+                    fn_ir.name
+                ));
             } else {
                 ui.warn(&format!(
                     "Hybrid fallback enabled for {}: {}",
@@ -724,9 +800,7 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
     if optimize {
         ui.step_line_ok(&format!(
             "Vectorized: {} | Reduced: {} | Simplified: {} loops",
-            pulse_stats.vectorized,
-            pulse_stats.reduced,
-            pulse_stats.simplified_loops
+            pulse_stats.vectorized, pulse_stats.reduced, pulse_stats.simplified_loops
         ));
         ui.step_line_ok(&format!(
             "Passes: SCCP {} | GVN {} | LICM {} | BCE {} | TCO {} | DCE {}",
@@ -745,7 +819,10 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
             pulse_stats.inline_rounds,
             pulse_stats.de_ssa_hits
         ));
-        ui.step_line_ok(&format!("Finished in {}", format_duration(step_opt.elapsed())));
+        ui.step_line_ok(&format!(
+            "Finished in {}",
+            format_duration(step_opt.elapsed())
+        ));
     } else {
         ui.step_line_ok(&format!(
             "Stabilized {} MIR functions in {}",
@@ -754,7 +831,12 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
         ));
     }
 
-    let step_emit = ui.step_start(5, TOTAL_STEPS, "R Code Emission", "reconstruct control flow");
+    let step_emit = ui.step_start(
+        5,
+        TOTAL_STEPS,
+        "R Code Emission",
+        "reconstruct control flow",
+    );
     for fn_name in &emit_order {
         if let Some(fn_ir) = all_fns.get(fn_name) {
             let (code, map) = crate::codegen::mir_emit::MirEmitter::new().emit(fn_ir)?;
@@ -770,7 +852,12 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
         format_duration(step_emit.elapsed())
     ));
 
-    let step_runtime = ui.step_start(6, TOTAL_STEPS, "Runtime Injection", "link static analysis guards");
+    let step_runtime = ui.step_start(
+        6,
+        TOTAL_STEPS,
+        "Runtime Injection",
+        "link static analysis guards",
+    );
 
     for call in top_level_calls {
         final_output.push_str(&format!("{}()\n", call));
@@ -786,15 +873,17 @@ fn compile(entry_path: &str, entry_input: &str, opt_level: OptLevel, _no_runtime
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or(entry_path);
-    with_runtime.push_str(&format!("rr_set_source(\"{}\");\n", escape_r_string(source_label)));
-    with_runtime.push_str(&final_output);
-    ui.step_line_ok(&format!(
-        "Output size: {}",
-        human_size(with_runtime.len())
+    with_runtime.push_str(&format!(
+        "rr_set_source(\"{}\");\n",
+        escape_r_string(source_label)
     ));
-    ui.trace("runtime", &format!("linked in {}", format_duration(step_runtime.elapsed())));
+    with_runtime.push_str(&final_output);
+    ui.step_line_ok(&format!("Output size: {}", human_size(with_runtime.len())));
+    ui.trace(
+        "runtime",
+        &format!("linked in {}", format_duration(step_runtime.elapsed())),
+    );
     ui.pulse_success(compile_started.elapsed());
 
     Ok((with_runtime, final_source_map))
 }
-

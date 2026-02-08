@@ -49,8 +49,24 @@ main();
 "#;
     let (ok, stdout, _stderr) = run_compile(src, "semantic_multi.rr");
     assert!(!ok, "compile must fail");
-    assert!(stdout.contains("semantic validation failed"), "missing aggregate header:\n{}", stdout);
-    assert!(stdout.contains("found "), "missing aggregate count:\n{}", stdout);
-    assert!(stdout.contains("undefined variable 'a'"), "missing undefined variable a:\n{}", stdout);
-    assert!(stdout.contains("undefined variable 'b'"), "missing undefined variable b:\n{}", stdout);
+    assert!(
+        stdout.contains("semantic validation failed"),
+        "missing aggregate header:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("found "),
+        "missing aggregate count:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("undefined variable 'a'"),
+        "missing undefined variable a:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("undefined variable 'b'"),
+        "missing undefined variable b:\n{}",
+        stdout
+    );
 }

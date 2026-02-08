@@ -1,4 +1,4 @@
-﻿use crate::syntax::token::{Token, TokenKind};
+use crate::syntax::token::{Token, TokenKind};
 use crate::utils::Span;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -55,13 +55,16 @@ impl<'a> Lexer<'a> {
                     Some('/') => {
                         // Line comment
                         while let Some(nc) = self.peek() {
-                            if nc == '\n' { break; }
+                            if nc == '\n' {
+                                break;
+                            }
                             self.advance();
                         }
                     }
                     Some('*') => {
                         // Block comment
-                        self.advance(); self.advance(); // eat /*
+                        self.advance();
+                        self.advance(); // eat /*
                         while let Some(nc) = self.advance() {
                             if nc == '*' {
                                 if let Some('/') = self.peek() {
@@ -79,8 +82,10 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn read_while<F>(&mut self, pred: F) -> String 
-    where F: Fn(char) -> bool {
+    fn read_while<F>(&mut self, pred: F) -> String
+    where
+        F: Fn(char) -> bool,
+    {
         let mut s = String::new();
         while let Some(c) = self.peek() {
             if pred(c) {
@@ -138,7 +143,7 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 }
-                
+
                 if is_float {
                     self.advance(); // eat .
                     let frac = self.read_while(|c| c.is_ascii_digit());
@@ -169,7 +174,10 @@ impl<'a> Lexer<'a> {
                                 't' => s.push('\t'),
                                 '"' => s.push('"'),
                                 '\\' => s.push('\\'),
-                                _ => { s.push('\\'); s.push(next_c); }
+                                _ => {
+                                    s.push('\\');
+                                    s.push(next_c);
+                                }
                             }
                         } else {
                             break;
@@ -186,16 +194,36 @@ impl<'a> Lexer<'a> {
             }
             Some('=') => {
                 self.advance();
-                if let Some('=') = self.peek() { self.advance(); TokenKind::Eq } 
-                else if let Some('>') = self.peek() { self.advance(); TokenKind::Arrow }
-                else { TokenKind::Assign }
+                if let Some('=') = self.peek() {
+                    self.advance();
+                    TokenKind::Eq
+                } else if let Some('>') = self.peek() {
+                    self.advance();
+                    TokenKind::Arrow
+                } else {
+                    TokenKind::Assign
+                }
             }
-            Some('@') => { self.advance(); TokenKind::At }
-            Some('^') => { self.advance(); TokenKind::Caret }
-            Some('?') => { self.advance(); TokenKind::Question }
+            Some('@') => {
+                self.advance();
+                TokenKind::At
+            }
+            Some('^') => {
+                self.advance();
+                TokenKind::Caret
+            }
+            Some('?') => {
+                self.advance();
+                TokenKind::Question
+            }
             Some('!') => {
                 self.advance();
-                if let Some('=') = self.peek() { self.advance(); TokenKind::Ne } else { TokenKind::Bang }
+                if let Some('=') = self.peek() {
+                    self.advance();
+                    TokenKind::Ne
+                } else {
+                    TokenKind::Bang
+                }
             }
             Some('<') => {
                 self.advance();
@@ -212,7 +240,12 @@ impl<'a> Lexer<'a> {
             }
             Some('>') => {
                 self.advance();
-                if let Some('=') = self.peek() { self.advance(); TokenKind::Ge } else { TokenKind::Gt }
+                if let Some('=') = self.peek() {
+                    self.advance();
+                    TokenKind::Ge
+                } else {
+                    TokenKind::Gt
+                }
             }
             Some('&') => {
                 self.advance();
@@ -235,18 +268,20 @@ impl<'a> Lexer<'a> {
             }
             Some('.') => {
                 // Check if float first? No, floats handled in digit branch if starts with digit.
-                // But .123 is valid float? 
-                // Current lexer handles leading digit floats. 
+                // But .123 is valid float?
+                // Current lexer handles leading digit floats.
                 // If starts with ., check if next is digit?
                 let mut is_start_float = false;
                 {
                     let mut lookahead = self.chars.clone();
                     lookahead.next(); // skip .
                     if let Some(c) = lookahead.peek() {
-                        if c.is_ascii_digit() { is_start_float = true; }
+                        if c.is_ascii_digit() {
+                            is_start_float = true;
+                        }
                     }
                 }
-                
+
                 if is_start_float {
                     self.advance(); // eat .
                     let frac = self.read_while(|c| c.is_ascii_digit());
@@ -254,13 +289,30 @@ impl<'a> Lexer<'a> {
                     TokenKind::Float(full.parse().unwrap_or(0.0))
                 } else {
                     self.advance();
-                    if let Some('.') = self.peek() { self.advance(); TokenKind::DotDot } else { TokenKind::Dot }
+                    if let Some('.') = self.peek() {
+                        self.advance();
+                        TokenKind::DotDot
+                    } else {
+                        TokenKind::Dot
+                    }
                 }
             }
-            Some('+') => { self.advance(); TokenKind::Plus }
-            Some('-') => { self.advance(); TokenKind::Minus }
-            Some('*') => { self.advance(); TokenKind::Star }
-            Some('/') => { self.advance(); TokenKind::Slash }
+            Some('+') => {
+                self.advance();
+                TokenKind::Plus
+            }
+            Some('-') => {
+                self.advance();
+                TokenKind::Minus
+            }
+            Some('*') => {
+                self.advance();
+                TokenKind::Star
+            }
+            Some('/') => {
+                self.advance();
+                TokenKind::Slash
+            }
             Some('%') => {
                 self.advance();
                 if let Some('*') = self.peek() {
@@ -275,15 +327,42 @@ impl<'a> Lexer<'a> {
                     TokenKind::Percent
                 }
             }
-            Some('(') => { self.advance(); TokenKind::LParen }
-            Some(')') => { self.advance(); TokenKind::RParen }
-            Some('{') => { self.advance(); TokenKind::LBrace }
-            Some('}') => { self.advance(); TokenKind::RBrace }
-            Some('[') => { self.advance(); TokenKind::LBracket }
-            Some(']') => { self.advance(); TokenKind::RBracket }
-            Some(',') => { self.advance(); TokenKind::Comma }
-            Some(':') => { self.advance(); TokenKind::Colon }
-            Some(';') => { self.advance(); TokenKind::Semicolon }
+            Some('(') => {
+                self.advance();
+                TokenKind::LParen
+            }
+            Some(')') => {
+                self.advance();
+                TokenKind::RParen
+            }
+            Some('{') => {
+                self.advance();
+                TokenKind::LBrace
+            }
+            Some('}') => {
+                self.advance();
+                TokenKind::RBrace
+            }
+            Some('[') => {
+                self.advance();
+                TokenKind::LBracket
+            }
+            Some(']') => {
+                self.advance();
+                TokenKind::RBracket
+            }
+            Some(',') => {
+                self.advance();
+                TokenKind::Comma
+            }
+            Some(':') => {
+                self.advance();
+                TokenKind::Colon
+            }
+            Some(';') => {
+                self.advance();
+                TokenKind::Semicolon
+            }
             None => TokenKind::EOF,
             Some(c) => {
                 self.advance();
@@ -294,10 +373,13 @@ impl<'a> Lexer<'a> {
         Token {
             kind,
             span: Span {
-                start_byte, end_byte: self.byte_pos,
-                start_line, start_col,
-                end_line: self.line, end_col: self.col,
-            }
+                start_byte,
+                end_byte: self.byte_pos,
+                start_line,
+                start_col,
+                end_line: self.line,
+                end_col: self.col,
+            },
         }
     }
 }

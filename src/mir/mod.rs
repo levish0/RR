@@ -1,14 +1,13 @@
-﻿#![allow(dead_code)]
+#![allow(dead_code)]
 
+pub mod analyze;
 pub mod def;
-pub mod opt;
 pub mod flow;
 pub mod lower_hir;
-pub mod analyze;
-pub mod verify;
-pub mod structurizer;
+pub mod opt;
 pub mod semantics;
-
+pub mod structurizer;
+pub mod verify;
 
 #[allow(unused_imports)]
 pub use def::*;

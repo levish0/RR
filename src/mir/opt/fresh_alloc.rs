@@ -1,7 +1,6 @@
-﻿
-use crate::mir::*;
 use crate::mir::def::EscapeStatus;
 use crate::mir::opt::loop_analysis::{LoopAnalyzer, build_pred_map};
+use crate::mir::*;
 use crate::syntax::ast::Lit;
 
 pub fn optimize(fn_ir: &mut FnIR) -> bool {
@@ -17,7 +16,10 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
     let preds = build_pred_map(fn_ir);
 
     for lp in loops {
-        let preheaders: Vec<BlockId> = preds.get(&lp.header).cloned().unwrap_or_default()
+        let preheaders: Vec<BlockId> = preds
+            .get(&lp.header)
+            .cloned()
+            .unwrap_or_default()
             .into_iter()
             .filter(|b| !lp.body.contains(b))
             .collect();
@@ -27,7 +29,11 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
         let preheader = preheaders[0];
 
         // Skip loops with branches in body (we can't guarantee full coverage)
-        if lp.body.iter().any(|b| matches!(fn_ir.blocks[*b].term, Terminator::If { .. })) {
+        if lp
+            .body
+            .iter()
+            .any(|b| matches!(fn_ir.blocks[*b].term, Terminator::If { .. }))
+        {
             continue;
         }
 
@@ -62,7 +68,13 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
         for &bid in &lp.body {
             for instr in &fn_ir.blocks[bid].instrs {
                 let (base, idx, val) = match instr {
-                    Instr::StoreIndex1D { base, idx, val, is_vector: false, .. } => (base, idx, val),
+                    Instr::StoreIndex1D {
+                        base,
+                        idx,
+                        val,
+                        is_vector: false,
+                        ..
+                    } => (base, idx, val),
                     _ => continue,
                 };
                 if *idx != iv {
@@ -84,9 +96,12 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
 
         for (dest_var, val, len_source) in plans {
             let len_val = match len_source {
-                LenSource::Along(x) => {
-                    fn_ir.add_value(ValueKind::Len { base: x }, crate::utils::Span::dummy(), Facts::empty(), None)
-                }
+                LenSource::Along(x) => fn_ir.add_value(
+                    ValueKind::Len { base: x },
+                    crate::utils::Span::dummy(),
+                    Facts::empty(),
+                    None,
+                ),
                 LenSource::Len(n) => n,
             };
 

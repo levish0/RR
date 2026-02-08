@@ -11,7 +11,12 @@ fn compile_rr(rr_bin: &Path, rr_src: &Path, out: &Path, level: &str) {
         .arg(level)
         .status()
         .expect("failed to run RR compiler");
-    assert!(status.success(), "RR compile failed for {} ({})", rr_src.display(), level);
+    assert!(
+        status.success(),
+        "RR compile failed for {} ({})",
+        rr_src.display(),
+        level
+    );
 }
 
 fn rscript_path() -> Option<String> {
@@ -99,10 +104,17 @@ print(main());
 
     assert_eq!(s0, 0, "O0 execution failed:\n{}", err0);
     assert_eq!(s2, 0, "O2 execution failed:\n{}", err2);
-    assert_eq!(normalize(&out0), normalize(&out2), "stdout mismatch O0 vs O2");
-    assert_eq!(normalize(&err0), normalize(&err2), "stderr mismatch O0 vs O2");
+    assert_eq!(
+        normalize(&out0),
+        normalize(&out2),
+        "stdout mismatch O0 vs O2"
+    );
+    assert_eq!(
+        normalize(&err0),
+        normalize(&err2),
+        "stderr mismatch O0 vs O2"
+    );
 
     let expected = "[1] 3\n[1] 15\n[1] 5\n[1] 12\n[1] 35\n";
     assert_eq!(normalize(&out0), expected, "unexpected runtime output");
 }
-

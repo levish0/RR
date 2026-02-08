@@ -1,6 +1,5 @@
-﻿
-use crate::mir::*;
 use crate::mir::def::EscapeStatus;
+use crate::mir::*;
 use std::collections::VecDeque;
 
 pub struct EscapeAnalysis;
@@ -32,15 +31,15 @@ impl EscapeAnalysis {
                     worklist.push_back(*arg);
                 }
             }
-            
+
             // C. Function Parameters (Incoming values escape by definition/conservative)
             if let Some(var_name) = &val.origin_var {
                 if fn_ir.params.contains(var_name) {
-                     worklist.push_back(val.id);
+                    worklist.push_back(val.id);
                 }
             }
         }
-        
+
         // 3. Build Dependency Graph (Adjacency List)
         // graph[v] contains list of u such that "If v escapes, u escapes"
         let mut graph: Vec<Vec<ValueId>> = vec![vec![]; fn_ir.values.len()];
@@ -52,7 +51,7 @@ impl EscapeAnalysis {
                     for (arg, _) in args {
                         graph[val.id].push(*arg);
                     }
-                },
+                }
                 _ => {}
             }
         }
@@ -74,13 +73,13 @@ impl EscapeAnalysis {
 
         // BFS Propagation
         while let Some(vid) = worklist.pop_front() {
-             // vid is known Escaped. Propagate to downstream dependencies.
-             for &dep in &graph[vid] {
-                 if fn_ir.values[dep].escape != EscapeStatus::Escaped {
-                     fn_ir.values[dep].escape = EscapeStatus::Escaped;
-                     worklist.push_back(dep);
-                 }
-             }
+            // vid is known Escaped. Propagate to downstream dependencies.
+            for &dep in &graph[vid] {
+                if fn_ir.values[dep].escape != EscapeStatus::Escaped {
+                    fn_ir.values[dep].escape = EscapeStatus::Escaped;
+                    worklist.push_back(dep);
+                }
+            }
         }
     }
 }

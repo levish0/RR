@@ -1,4 +1,3 @@
-﻿
 use crate::utils::Span;
 
 // ----- IDs -----
@@ -83,12 +82,16 @@ pub struct HirFn {
 
 #[derive(Clone, Debug)]
 pub struct HirFnAttrs {
-    pub inline_hint: InlineHint,     // default/always/never
-    pub tidy_safe: bool,             // NSE-friendly (default false)
+    pub inline_hint: InlineHint, // default/always/never
+    pub tidy_safe: bool,         // NSE-friendly (default false)
 }
 
 #[derive(Clone, Debug)]
-pub enum InlineHint { Default, Always, Never }
+pub enum InlineHint {
+    Default,
+    Always,
+    Never,
+}
 
 #[derive(Clone, Debug)]
 pub struct HirParam {
@@ -107,30 +110,74 @@ pub struct HirBlock {
 
 #[derive(Clone, Debug)]
 pub enum HirStmt {
-    Let { local: LocalId, name: SymbolId, ty: Option<Ty>, init: Option<HirExpr>, span: Span },
-    Assign { target: HirLValue, value: HirExpr, span: Span },
-    If { cond: HirExpr, then_blk: HirBlock, else_blk: Option<HirBlock>, span: Span },
-    While { cond: HirExpr, body: HirBlock, span: Span },
-    For { iter: HirForIter, body: HirBlock, span: Span }, // canonicalized early if possible
-    Return { value: Option<HirExpr>, span: Span },
-    Break { span: Span },
-    Next { span: Span },
-    Expr { expr: HirExpr, span: Span },
+    Let {
+        local: LocalId,
+        name: SymbolId,
+        ty: Option<Ty>,
+        init: Option<HirExpr>,
+        span: Span,
+    },
+    Assign {
+        target: HirLValue,
+        value: HirExpr,
+        span: Span,
+    },
+    If {
+        cond: HirExpr,
+        then_blk: HirBlock,
+        else_blk: Option<HirBlock>,
+        span: Span,
+    },
+    While {
+        cond: HirExpr,
+        body: HirBlock,
+        span: Span,
+    },
+    For {
+        iter: HirForIter,
+        body: HirBlock,
+        span: Span,
+    }, // canonicalized early if possible
+    Return {
+        value: Option<HirExpr>,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Next {
+        span: Span,
+    },
+    Expr {
+        expr: HirExpr,
+        span: Span,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub enum HirForIter {
-    Range { var: LocalId, start: HirExpr, end: HirExpr, inclusive: bool }, // e.g. 1..=n
-    SeqLen { var: LocalId, len: HirExpr },                                  // seq_len(n)
-    SeqAlong { var: LocalId, xs: HirExpr },                                  // seq_along(x)
+    Range {
+        var: LocalId,
+        start: HirExpr,
+        end: HirExpr,
+        inclusive: bool,
+    }, // e.g. 1..=n
+    SeqLen {
+        var: LocalId,
+        len: HirExpr,
+    }, // seq_len(n)
+    SeqAlong {
+        var: LocalId,
+        xs: HirExpr,
+    }, // seq_along(x)
 }
 
 // LValues
 #[derive(Clone, Debug)]
 pub enum HirLValue {
     Local(LocalId),
-    Index { base: HirExpr, index: Vec<HirExpr> },  // y[i], m[i,j]
-    Field { base: HirExpr, name: SymbolId },  // obj.x
+    Index { base: HirExpr, index: Vec<HirExpr> }, // y[i], m[i,j]
+    Field { base: HirExpr, name: SymbolId },      // obj.x
 }
 
 // ----- Expressions -----
@@ -140,19 +187,32 @@ pub enum HirExpr {
     Global(SymbolId),
     Lit(HirLit),
 
-    Call(HirCall),                 // normal call
-    TidyCall(HirTidyCall),         // dplyr pipeline node (special)
+    Call(HirCall),         // normal call
+    TidyCall(HirTidyCall), // dplyr pipeline node (special)
 
-    Index { base: Box<HirExpr>, index: Vec<HirExpr> }, 
-    Field { base: Box<HirExpr>, name: SymbolId },
+    Index {
+        base: Box<HirExpr>,
+        index: Vec<HirExpr>,
+    },
+    Field {
+        base: Box<HirExpr>,
+        name: SymbolId,
+    },
 
     Block(HirBlock), // { stmt; expr }
 
-    IfExpr { cond: Box<HirExpr>, then_expr: Box<HirExpr>, else_expr: Box<HirExpr> }, 
+    IfExpr {
+        cond: Box<HirExpr>,
+        then_expr: Box<HirExpr>,
+        else_expr: Box<HirExpr>,
+    },
 
-    // Match kept for potential exhaustive checking before desugaring, 
+    // Match kept for potential exhaustive checking before desugaring,
     // or as intermediate node.
-    Match { scrut: Box<HirExpr>, arms: Vec<HirMatchArm> },
+    Match {
+        scrut: Box<HirExpr>,
+        arms: Vec<HirMatchArm>,
+    },
 
     // Option/Result constructors
     Some(Box<HirExpr>),
@@ -163,13 +223,23 @@ pub enum HirExpr {
     // Try operator
     Try(Box<HirExpr>),
 
-    Unary { op: HirUnOp, expr: Box<HirExpr> },
-    Binary { op: HirBinOp, lhs: Box<HirExpr>, rhs: Box<HirExpr> },
-    
+    Unary {
+        op: HirUnOp,
+        expr: Box<HirExpr>,
+    },
+    Binary {
+        op: HirBinOp,
+        lhs: Box<HirExpr>,
+        rhs: Box<HirExpr>,
+    },
+
     ListLit(Vec<(SymbolId, HirExpr)>),
     VectorLit(Vec<HirExpr>),
-    Range { start: Box<HirExpr>, end: Box<HirExpr> },
-    
+    Range {
+        start: Box<HirExpr>,
+        end: Box<HirExpr>,
+    },
+
     // v6.0 Phase 3
     Unquote(Box<HirExpr>), // ^expr
     Column(String),        // @name
@@ -178,7 +248,7 @@ pub enum HirExpr {
 #[derive(Clone, Debug)]
 pub struct HirCall {
     pub callee: Box<HirExpr>,
-    pub args: Vec<HirArg>,          // named args retained for resolution
+    pub args: Vec<HirArg>, // named args retained for resolution
     pub span: Span,
 }
 
@@ -201,54 +271,98 @@ pub struct HirMatchArm {
 pub enum HirPat {
     Wild,
     Lit(HirLit),
-    Bind { name: SymbolId, local: LocalId },
+    Bind {
+        name: SymbolId,
+        local: LocalId,
+    },
     Or(Vec<HirPat>),
 
-    List { items: Vec<HirPat>, rest: Option<(SymbolId, LocalId)> },
-    Record { fields: Vec<(SymbolId, HirPat)> }, // {x: pat, y: pat}
+    List {
+        items: Vec<HirPat>,
+        rest: Option<(SymbolId, LocalId)>,
+    },
+    Record {
+        fields: Vec<(SymbolId, HirPat)>,
+    }, // {x: pat, y: pat}
 }
 
 // Tidy
 #[derive(Clone, Debug)]
 pub struct HirTidyCall {
-    pub input: Box<HirExpr>,         // df (or result of previous tidy op)
-    pub verb: TidyVerb,              // filter/mutate/...
-    pub args: Vec<TidyArg>,          // expressions with @col/^unquote inside
+    pub input: Box<HirExpr>, // df (or result of previous tidy op)
+    pub verb: TidyVerb,      // filter/mutate/...
+    pub args: Vec<TidyArg>,  // expressions with @col/^unquote inside
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub enum TidyVerb {
-    Filter, Mutate, Select, Summarise, Arrange, GroupBy, Rename,
+    Filter,
+    Mutate,
+    Select,
+    Summarise,
+    Arrange,
+    GroupBy,
+    Rename,
 }
 
 #[derive(Clone, Debug)]
 pub enum TidyArg {
-    Expr(TidyExpr),                  // filter(@age > 20)
-    Named(SymbolId, TidyExpr),       // mutate(height_m = @h / 100)
+    Expr(TidyExpr),            // filter(@age > 20)
+    Named(SymbolId, TidyExpr), // mutate(height_m = @h / 100)
 }
 
 #[derive(Clone, Debug)]
 pub enum TidyExpr {
     Lit(HirLit),
-    Ident(SymbolId),                 // helper functions like starts_with
-    Col(SymbolId),                   // @col
-    Env(LocalId),                    // ^var (after resolution)
-    Unary { op: HirUnOp, expr: Box<TidyExpr> },
-    Binary { op: HirBinOp, lhs: Box<TidyExpr>, rhs: Box<TidyExpr> },
-    Call { callee: Box<TidyExpr>, args: Vec<TidyExpr> },
+    Ident(SymbolId), // helper functions like starts_with
+    Col(SymbolId),   // @col
+    Env(LocalId),    // ^var (after resolution)
+    Unary {
+        op: HirUnOp,
+        expr: Box<TidyExpr>,
+    },
+    Binary {
+        op: HirBinOp,
+        lhs: Box<TidyExpr>,
+        rhs: Box<TidyExpr>,
+    },
+    Call {
+        callee: Box<TidyExpr>,
+        args: Vec<TidyExpr>,
+    },
 }
 
+#[derive(Clone, Debug)]
+pub enum HirLit {
+    Int(i64),
+    Double(f64),
+    Char(String),
+    Bool(bool),
+    NA,
+    Null,
+}
 
 #[derive(Clone, Debug)]
-pub enum HirLit { Int(i64), Double(f64), Char(String), Bool(bool), NA, Null }
-
-#[derive(Clone, Debug)]
-pub enum HirUnOp { Not, Neg }
+pub enum HirUnOp {
+    Not,
+    Neg,
+}
 
 #[derive(Clone, Debug)]
 pub enum HirBinOp {
-    Add, Sub, Mul, Div, Mod, MatMul,
-    And, Or,
-    Eq, Ne, Lt, Le, Gt, Ge,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    MatMul,
+    And,
+    Or,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }

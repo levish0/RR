@@ -13,7 +13,10 @@ fn unique_dir(root: &PathBuf, name: &str) -> PathBuf {
 
 fn run_compile(source: &str, file_name: &str) -> (bool, String, String) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let sandbox_root = root.join("target").join("tests").join("runtime_static_errors");
+    let sandbox_root = root
+        .join("target")
+        .join("tests")
+        .join("runtime_static_errors");
     fs::create_dir_all(&sandbox_root).expect("failed to create sandbox root");
     let proj_dir = unique_dir(&sandbox_root, "proj");
     fs::create_dir_all(&proj_dir).expect("failed to create project dir");
@@ -49,7 +52,11 @@ main();
 "#;
     let (ok, stdout, _stderr) = run_compile(src, "if_na.rr");
     assert!(!ok, "compile must fail for statically NA condition");
-    assert!(stdout.contains("** (RR.RuntimeError)"), "missing runtime error header:\n{}", stdout);
+    assert!(
+        stdout.contains("** (RR.RuntimeError)"),
+        "missing runtime error header:\n{}",
+        stdout
+    );
     assert!(
         stdout.contains("condition is statically NA"),
         "missing NA condition detail:\n{}",
@@ -67,7 +74,11 @@ main();
 "#;
     let (ok, stdout, _stderr) = run_compile(src, "div_zero.rr");
     assert!(!ok, "compile must fail for guaranteed divide by zero");
-    assert!(stdout.contains("** (RR.RuntimeError)"), "missing runtime error header:\n{}", stdout);
+    assert!(
+        stdout.contains("** (RR.RuntimeError)"),
+        "missing runtime error header:\n{}",
+        stdout
+    );
     assert!(
         stdout.contains("division by zero is guaranteed at compile-time"),
         "missing divide-by-zero detail:\n{}",
@@ -87,7 +98,11 @@ main();
 "#;
     let (ok, stdout, _stderr) = run_compile(src, "bad_write_index.rr");
     assert!(!ok, "compile must fail for statically invalid write index");
-    assert!(stdout.contains("** (RR.RuntimeError)"), "missing runtime error header:\n{}", stdout);
+    assert!(
+        stdout.contains("** (RR.RuntimeError)"),
+        "missing runtime error header:\n{}",
+        stdout
+    );
     assert!(
         stdout.contains("out of bounds"),
         "missing index-out-of-bounds detail:\n{}",
@@ -114,12 +129,24 @@ main();
         "missing aggregate runtime header:\n{}",
         stdout
     );
-    assert!(stdout.contains("found "), "missing aggregate count:\n{}", stdout);
-    assert!(stdout.contains("condition is statically NA"), "missing NA condition error:\n{}", stdout);
+    assert!(
+        stdout.contains("found "),
+        "missing aggregate count:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("condition is statically NA"),
+        "missing NA condition error:\n{}",
+        stdout
+    );
     assert!(
         stdout.contains("division by zero is guaranteed at compile-time"),
         "missing division-by-zero error:\n{}",
         stdout
     );
-    assert!(stdout.contains("out of bounds"), "missing index error:\n{}", stdout);
+    assert!(
+        stdout.contains("out of bounds"),
+        "missing index error:\n{}",
+        stdout
+    );
 }

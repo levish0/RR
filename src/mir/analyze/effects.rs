@@ -1,4 +1,3 @@
-﻿
 use crate::mir::*;
 
 /// Checks if a statement has side effects.
@@ -16,7 +15,9 @@ pub fn rvalue_is_pure(vid: ValueId, fn_ir: &FnIR) -> bool {
     let val = &fn_ir.values[vid];
     match &val.kind {
         ValueKind::Const(_) => true,
-        ValueKind::Binary { lhs, rhs, .. } => rvalue_is_pure(*lhs, fn_ir) && rvalue_is_pure(*rhs, fn_ir),
+        ValueKind::Binary { lhs, rhs, .. } => {
+            rvalue_is_pure(*lhs, fn_ir) && rvalue_is_pure(*rhs, fn_ir)
+        }
         ValueKind::Unary { rhs, .. } => rvalue_is_pure(*rhs, fn_ir),
         ValueKind::Phi { args } => args.iter().all(|(v, _)| rvalue_is_pure(*v, fn_ir)),
         ValueKind::Call { callee, args, .. } => {
@@ -28,8 +29,12 @@ pub fn rvalue_is_pure(vid: ValueId, fn_ir: &FnIR) -> bool {
         }
         ValueKind::Len { base } => rvalue_is_pure(*base, fn_ir),
         ValueKind::Indices { base } => rvalue_is_pure(*base, fn_ir),
-        ValueKind::Range { start, end } => rvalue_is_pure(*start, fn_ir) && rvalue_is_pure(*end, fn_ir),
-        ValueKind::Index1D { base, idx, .. } => rvalue_is_pure(*base, fn_ir) && rvalue_is_pure(*idx, fn_ir),
+        ValueKind::Range { start, end } => {
+            rvalue_is_pure(*start, fn_ir) && rvalue_is_pure(*end, fn_ir)
+        }
+        ValueKind::Index1D { base, idx, .. } => {
+            rvalue_is_pure(*base, fn_ir) && rvalue_is_pure(*idx, fn_ir)
+        }
         ValueKind::Index2D { base, r, c } => {
             rvalue_is_pure(*base, fn_ir) && rvalue_is_pure(*r, fn_ir) && rvalue_is_pure(*c, fn_ir)
         }
@@ -41,35 +46,10 @@ pub fn rvalue_is_pure(vid: ValueId, fn_ir: &FnIR) -> bool {
 pub fn call_is_pure(callee: &str) -> bool {
     match callee {
         // Built-in pure functions
-        "length"
-        | "seq_len"
-        | "seq_along"
-        | "abs"
-        | "sqrt"
-        | "sin"
-        | "cos"
-        | "tan"
-        | "log"
-        | "exp"
-        | "c"
-        | "sum"
-        | "mean"
-        | "var"
-        | "sd"
-        | "min"
-        | "max"
-        | "prod"
-        | "colSums"
-        | "rowSums"
-        | "%*%"
-        | "crossprod"
-        | "tcrossprod"
-        | "rr_field_get"
-        | "rr_field_exists"
-        | "rr_list_rest"
-        | "rr_named_list"
-        | "rr_row_sum_range"
-        | "rr_col_sum_range" => true,
+        "length" | "seq_len" | "seq_along" | "abs" | "sqrt" | "sin" | "cos" | "tan" | "log"
+        | "exp" | "c" | "sum" | "mean" | "var" | "sd" | "min" | "max" | "prod" | "colSums"
+        | "rowSums" | "%*%" | "crossprod" | "tcrossprod" | "rr_field_get" | "rr_field_exists"
+        | "rr_list_rest" | "rr_named_list" | "rr_row_sum_range" | "rr_col_sum_range" => true,
         // Comparison/Logical helpers that might be lowered as calls
         "rr_bool" => true,
         _ => false,
@@ -91,9 +71,17 @@ pub fn loop_is_pure(fn_ir: &FnIR, body: &std::collections::HashSet<BlockId>) -> 
         // Also check if terminator has side effects (usually not, but If/Goto are pure)
         let block = &fn_ir.blocks[bid];
         match &block.term {
-            Terminator::Return(Some(v)) => if !rvalue_is_pure(*v, fn_ir) { return false; },
-            Terminator::If { cond, .. } => if !rvalue_is_pure(*cond, fn_ir) { return false; },
-            Terminator::Goto(_) | Terminator::Return(None) | Terminator::Unreachable => {},
+            Terminator::Return(Some(v)) => {
+                if !rvalue_is_pure(*v, fn_ir) {
+                    return false;
+                }
+            }
+            Terminator::If { cond, .. } => {
+                if !rvalue_is_pure(*cond, fn_ir) {
+                    return false;
+                }
+            }
+            Terminator::Goto(_) | Terminator::Return(None) | Terminator::Unreachable => {}
         }
     }
     true

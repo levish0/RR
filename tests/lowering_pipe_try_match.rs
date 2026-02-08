@@ -31,7 +31,10 @@ fn rscript_available(path: &str) -> bool {
 #[test]
 fn pipe_try_match_lowering_is_implemented_without_unimplemented_logs() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let sandbox_root = root.join("target").join("tests").join("lowering_pipe_try_match");
+    let sandbox_root = root
+        .join("target")
+        .join("tests")
+        .join("lowering_pipe_try_match");
     fs::create_dir_all(&sandbox_root).expect("failed to create sandbox root");
     let proj_dir = unique_dir(&sandbox_root, "case");
     fs::create_dir_all(&proj_dir).expect("failed to create project dir");
@@ -105,4 +108,3 @@ main();
         );
     }
 }
-

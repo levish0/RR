@@ -1,6 +1,5 @@
-﻿
+use crate::mir::opt::loop_analysis::{LoopAnalyzer, LoopInfo, build_pred_map};
 use crate::mir::*;
-use crate::mir::opt::loop_analysis::{build_pred_map, LoopAnalyzer, LoopInfo};
 use crate::syntax::ast::BinOp;
 use std::collections::{HashMap, HashSet};
 
@@ -81,12 +80,46 @@ pub fn optimize_with_stats_with_whitelist(
 
 #[derive(Debug)]
 pub enum VectorPlan {
-    Reduce { kind: ReduceKind, acc_phi: ValueId, vec_expr: ValueId, iv_phi: ValueId },
-    Reduce2DRowSum { acc_phi: ValueId, base: ValueId, row: ValueId, start: ValueId, end: ValueId },
-    Reduce2DColSum { acc_phi: ValueId, base: ValueId, col: ValueId, start: ValueId, end: ValueId },
-    Map { dest: ValueId, src: ValueId, op: crate::syntax::ast::BinOp, other: ValueId },
-    CondMap { dest: ValueId, cond: ValueId, then_val: ValueId, else_val: ValueId, iv_phi: ValueId },
-    RecurrenceAddConst { base: ValueId, start: ValueId, end: ValueId, delta: ValueId, negate_delta: bool },
+    Reduce {
+        kind: ReduceKind,
+        acc_phi: ValueId,
+        vec_expr: ValueId,
+        iv_phi: ValueId,
+    },
+    Reduce2DRowSum {
+        acc_phi: ValueId,
+        base: ValueId,
+        row: ValueId,
+        start: ValueId,
+        end: ValueId,
+    },
+    Reduce2DColSum {
+        acc_phi: ValueId,
+        base: ValueId,
+        col: ValueId,
+        start: ValueId,
+        end: ValueId,
+    },
+    Map {
+        dest: ValueId,
+        src: ValueId,
+        op: crate::syntax::ast::BinOp,
+        other: ValueId,
+    },
+    CondMap {
+        dest: ValueId,
+        cond: ValueId,
+        then_val: ValueId,
+        else_val: ValueId,
+        iv_phi: ValueId,
+    },
+    RecurrenceAddConst {
+        base: ValueId,
+        start: ValueId,
+        end: ValueId,
+        delta: ValueId,
+        negate_delta: bool,
+    },
     ShiftedMap {
         dest: ValueId,
         src: ValueId,
@@ -141,15 +174,19 @@ fn match_reduction(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
         // Conservative: do not fold reductions if loop writes memory.
         return None;
     }
-    
+
     for (id, val) in fn_ir.values.iter().enumerate() {
         if let ValueKind::Phi { args } = &val.kind {
             if args.len() == 2 && args.iter().any(|(_, b)| *b == lp.latch) {
                 let (next_val, _) = args.iter().find(|(_, b)| *b == lp.latch).unwrap();
                 let next_v = &fn_ir.values[*next_val];
-                
+
                 match &next_v.kind {
-                    ValueKind::Binary { op: crate::syntax::ast::BinOp::Add, lhs, rhs } => {
+                    ValueKind::Binary {
+                        op: crate::syntax::ast::BinOp::Add,
+                        lhs,
+                        rhs,
+                    } => {
                         if *lhs == id || *rhs == id {
                             let other = if *lhs == id { *rhs } else { *lhs };
                             if expr_has_iv_dependency(fn_ir, other, iv_phi)
@@ -164,7 +201,11 @@ fn match_reduction(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
                             }
                         }
                     }
-                    ValueKind::Binary { op: crate::syntax::ast::BinOp::Mul, lhs, rhs } => {
+                    ValueKind::Binary {
+                        op: crate::syntax::ast::BinOp::Mul,
+                        lhs,
+                        rhs,
+                    } => {
                         if *lhs == id || *rhs == id {
                             let other = if *lhs == id { *rhs } else { *lhs };
                             if expr_has_iv_dependency(fn_ir, other, iv_phi)
@@ -179,20 +220,32 @@ fn match_reduction(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
                             }
                         }
                     }
-                    ValueKind::Call { callee, args, .. } if (callee == "min" || callee == "max") && args.len() == 2 => {
+                    ValueKind::Call { callee, args, .. }
+                        if (callee == "min" || callee == "max") && args.len() == 2 =>
+                    {
                         let (a, b) = (args[0], args[1]);
-                        let acc_side = if a == id { Some(b) } else if b == id { Some(a) } else { None };
+                        let acc_side = if a == id {
+                            Some(b)
+                        } else if b == id {
+                            Some(a)
+                        } else {
+                            None
+                        };
                         if let Some(other) = acc_side {
                             if expr_has_iv_dependency(fn_ir, other, iv_phi)
                                 && is_vectorizable_expr(fn_ir, other, iv_phi, lp, false, true)
                             {
-                                    let kind = if callee == "min" { ReduceKind::Min } else { ReduceKind::Max };
-                                    return Some(VectorPlan::Reduce {
-                                        kind,
-                                        acc_phi: id,
-                                        vec_expr: other,
-                                        iv_phi,
-                                    });
+                                let kind = if callee == "min" {
+                                    ReduceKind::Min
+                                } else {
+                                    ReduceKind::Max
+                                };
+                                return Some(VectorPlan::Reduce {
+                                    kind,
+                                    acc_phi: id,
+                                    vec_expr: other,
+                                    iv_phi,
+                                });
                             }
                         }
                     }
@@ -214,12 +267,21 @@ fn match_2d_row_reduction_sum(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan>
     }
 
     for (id, val) in fn_ir.values.iter().enumerate() {
-        let ValueKind::Phi { args } = &val.kind else { continue };
+        let ValueKind::Phi { args } = &val.kind else {
+            continue;
+        };
         if args.len() != 2 || !args.iter().any(|(_, b)| *b == lp.latch) {
             continue;
         }
         let (next_val, _) = args.iter().find(|(_, b)| *b == lp.latch).unwrap();
-        let ValueKind::Binary { op: BinOp::Add, lhs, rhs } = fn_ir.values[*next_val].kind else { continue };
+        let ValueKind::Binary {
+            op: BinOp::Add,
+            lhs,
+            rhs,
+        } = fn_ir.values[*next_val].kind
+        else {
+            continue;
+        };
         let other = if lhs == id {
             rhs
         } else if rhs == id {
@@ -227,7 +289,9 @@ fn match_2d_row_reduction_sum(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan>
         } else {
             continue;
         };
-        let ValueKind::Index2D { base, r, c } = fn_ir.values[other].kind else { continue };
+        let ValueKind::Index2D { base, r, c } = fn_ir.values[other].kind else {
+            continue;
+        };
         if !is_iv_equivalent(fn_ir, c, iv_phi) || expr_has_iv_dependency(fn_ir, r, iv_phi) {
             continue;
         }
@@ -255,12 +319,21 @@ fn match_2d_col_reduction_sum(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan>
     }
 
     for (id, val) in fn_ir.values.iter().enumerate() {
-        let ValueKind::Phi { args } = &val.kind else { continue };
+        let ValueKind::Phi { args } = &val.kind else {
+            continue;
+        };
         if args.len() != 2 || !args.iter().any(|(_, b)| *b == lp.latch) {
             continue;
         }
         let (next_val, _) = args.iter().find(|(_, b)| *b == lp.latch).unwrap();
-        let ValueKind::Binary { op: BinOp::Add, lhs, rhs } = fn_ir.values[*next_val].kind else { continue };
+        let ValueKind::Binary {
+            op: BinOp::Add,
+            lhs,
+            rhs,
+        } = fn_ir.values[*next_val].kind
+        else {
+            continue;
+        };
         let other = if lhs == id {
             rhs
         } else if rhs == id {
@@ -268,7 +341,9 @@ fn match_2d_col_reduction_sum(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan>
         } else {
             continue;
         };
-        let ValueKind::Index2D { base, r, c } = fn_ir.values[other].kind else { continue };
+        let ValueKind::Index2D { base, r, c } = fn_ir.values[other].kind else {
+            continue;
+        };
         if !is_iv_equivalent(fn_ir, r, iv_phi) || expr_has_iv_dependency(fn_ir, c, iv_phi) {
             continue;
         }
@@ -289,10 +364,19 @@ fn match_2d_col_reduction_sum(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan>
 fn match_map(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
     let iv = lp.iv.as_ref()?;
     let iv_phi = iv.phi_val;
-    
+
     for &bid in &lp.body {
         for instr in &fn_ir.blocks[bid].instrs {
-            if let Instr::StoreIndex1D { base, idx, val, is_vector: false, is_safe, is_na_safe, .. } = instr {
+            if let Instr::StoreIndex1D {
+                base,
+                idx,
+                val,
+                is_vector: false,
+                is_safe,
+                is_na_safe,
+                ..
+            } = instr
+            {
                 if is_iv_equivalent(fn_ir, *idx, iv_phi) && *is_safe && *is_na_safe {
                     let rhs_val = &fn_ir.values[*val];
                     if let ValueKind::Binary { op, lhs, rhs } = &rhs_val.kind {
@@ -354,7 +438,12 @@ fn match_conditional_map(
         if bid == lp.header {
             continue;
         }
-        if let Terminator::If { cond, then_bb, else_bb } = fn_ir.blocks[bid].term {
+        if let Terminator::If {
+            cond,
+            then_bb,
+            else_bb,
+        } = fn_ir.blocks[bid].term
+        {
             if !lp.body.contains(&then_bb) || !lp.body.contains(&else_bb) {
                 continue;
             }
@@ -376,7 +465,10 @@ fn match_conditional_map(
             let dest_base = if then_base == else_base {
                 then_base
             } else {
-                match (resolve_base_var(fn_ir, then_base), resolve_base_var(fn_ir, else_base)) {
+                match (
+                    resolve_base_var(fn_ir, then_base),
+                    resolve_base_var(fn_ir, else_base),
+                ) {
                     (Some(a), Some(b)) if a == b => then_base,
                     _ => continue,
                 }
@@ -431,20 +523,23 @@ fn match_recurrence_add_const(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan>
                 continue;
             }
 
-            let ValueKind::Binary { op, lhs, rhs } = &fn_ir.values[val].kind else { continue };
+            let ValueKind::Binary { op, lhs, rhs } = &fn_ir.values[val].kind else {
+                continue;
+            };
             if !matches!(*op, BinOp::Add | BinOp::Sub) {
                 continue;
             }
 
-            let (prev_side, delta_side, negate_delta) = if is_prev_element(fn_ir, *lhs, base, iv_phi) {
-                // a[i] = a[i-1] + delta  or  a[i] = a[i-1] - delta
-                (*lhs, *rhs, *op == BinOp::Sub)
-            } else if *op == BinOp::Add && is_prev_element(fn_ir, *rhs, base, iv_phi) {
-                // a[i] = delta + a[i-1]
-                (*rhs, *lhs, false)
-            } else {
-                continue;
-            };
+            let (prev_side, delta_side, negate_delta) =
+                if is_prev_element(fn_ir, *lhs, base, iv_phi) {
+                    // a[i] = a[i-1] + delta  or  a[i] = a[i-1] - delta
+                    (*lhs, *rhs, *op == BinOp::Sub)
+                } else if *op == BinOp::Add && is_prev_element(fn_ir, *rhs, base, iv_phi) {
+                    // a[i] = delta + a[i-1]
+                    (*rhs, *lhs, false)
+                } else {
+                    continue;
+                };
 
             if !is_prev_element(fn_ir, prev_side, base, iv_phi) {
                 continue;
@@ -494,9 +589,14 @@ fn match_shifted_map(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
                 base: src_base,
                 idx: src_idx,
                 ..
-            } = fn_ir.values[rhs].kind.clone() else { continue };
+            } = fn_ir.values[rhs].kind.clone()
+            else {
+                continue;
+            };
 
-            let Some(offset) = affine_iv_offset(fn_ir, src_idx, iv_phi) else { continue };
+            let Some(offset) = affine_iv_offset(fn_ir, src_idx, iv_phi) else {
+                continue;
+            };
             if offset == 0 {
                 continue;
             }
@@ -546,7 +646,9 @@ fn match_call_map(
                 continue;
             }
             let rhs = resolve_load_alias_value(fn_ir, rhs);
-            let ValueKind::Call { callee, args, .. } = &fn_ir.values[rhs].kind else { continue };
+            let ValueKind::Call { callee, args, .. } = &fn_ir.values[rhs].kind else {
+                continue;
+            };
             if !is_vector_safe_call(callee, args.len(), user_call_whitelist) {
                 continue;
             }
@@ -556,18 +658,25 @@ fn match_call_map(
             for arg in args {
                 let arg = resolve_load_alias_value(fn_ir, *arg);
                 if expr_has_iv_dependency(fn_ir, arg, iv_phi) {
-                    if !is_vector_safe_call_chain_expr(fn_ir, arg, iv_phi, lp, user_call_whitelist) {
+                    if !is_vector_safe_call_chain_expr(fn_ir, arg, iv_phi, lp, user_call_whitelist)
+                    {
                         mapped_args.clear();
                         break;
                     }
-                    mapped_args.push(CallMapArg { value: arg, vectorized: true });
+                    mapped_args.push(CallMapArg {
+                        value: arg,
+                        vectorized: true,
+                    });
                     has_vector_arg = true;
                 } else {
                     if !is_loop_invariant_scalar_expr(fn_ir, arg, iv_phi, user_call_whitelist) {
                         mapped_args.clear();
                         break;
                     }
-                    mapped_args.push(CallMapArg { value: arg, vectorized: false });
+                    mapped_args.push(CallMapArg {
+                        value: arg,
+                        vectorized: false,
+                    });
                 }
             }
             if mapped_args.is_empty() || !has_vector_arg {
@@ -586,27 +695,9 @@ fn match_call_map(
 
 pub(crate) fn is_builtin_vector_safe_call(callee: &str, arity: usize) -> bool {
     match callee {
-        "abs"
-        | "sqrt"
-        | "exp"
-        | "log"
-        | "log10"
-        | "log2"
-        | "sin"
-        | "cos"
-        | "tan"
-        | "asin"
-        | "acos"
-        | "atan"
-        | "sinh"
-        | "cosh"
-        | "tanh"
-        | "sign"
-        | "floor"
-        | "ceiling"
-        | "trunc"
-        | "gamma"
-        | "lgamma" => arity == 1,
+        "abs" | "sqrt" | "exp" | "log" | "log10" | "log2" | "sin" | "cos" | "tan" | "asin"
+        | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "sign" | "floor" | "ceiling" | "trunc"
+        | "gamma" | "lgamma" => arity == 1,
         "atan2" => arity == 2,
         "round" => arity == 1 || arity == 2,
         "pmax" | "pmin" => arity >= 2,
@@ -625,12 +716,19 @@ fn is_const_number(fn_ir: &FnIR, vid: ValueId) -> bool {
     )
 }
 
-fn is_invariant_reduce_scalar(fn_ir: &FnIR, scalar: ValueId, iv_phi: ValueId, base: ValueId) -> bool {
+fn is_invariant_reduce_scalar(
+    fn_ir: &FnIR,
+    scalar: ValueId,
+    iv_phi: ValueId,
+    base: ValueId,
+) -> bool {
     if expr_has_iv_dependency(fn_ir, scalar, iv_phi) || expr_reads_base(fn_ir, scalar, base) {
         return false;
     }
     match &fn_ir.values[canonical_value(fn_ir, scalar)].kind {
-        ValueKind::Const(Lit::Int(_)) | ValueKind::Const(Lit::Float(_)) | ValueKind::Param { .. } => true,
+        ValueKind::Const(Lit::Int(_))
+        | ValueKind::Const(Lit::Float(_))
+        | ValueKind::Param { .. } => true,
         ValueKind::Load { var } => {
             if let Some(base_var) = resolve_base_var(fn_ir, base) {
                 var != &base_var
@@ -664,7 +762,9 @@ fn is_loop_invariant_scalar_expr(
         }
         match &fn_ir.values[root].kind {
             ValueKind::Const(_) => true,
-            ValueKind::Load { .. } | ValueKind::Param { .. } => vector_length_key(fn_ir, root).is_none(),
+            ValueKind::Load { .. } | ValueKind::Param { .. } => {
+                vector_length_key(fn_ir, root).is_none()
+            }
             ValueKind::Unary { rhs, .. } => rec(fn_ir, *rhs, iv_phi, user_call_whitelist, seen),
             ValueKind::Binary { lhs, rhs, .. } => {
                 rec(fn_ir, *lhs, iv_phi, user_call_whitelist, seen)
@@ -673,7 +773,9 @@ fn is_loop_invariant_scalar_expr(
             ValueKind::Len { base } => rec(fn_ir, *base, iv_phi, user_call_whitelist, seen),
             ValueKind::Call { callee, args, .. } => {
                 is_vector_safe_call(callee, args.len(), user_call_whitelist)
-                    && args.iter().all(|a| rec(fn_ir, *a, iv_phi, user_call_whitelist, seen))
+                    && args
+                        .iter()
+                        .all(|a| rec(fn_ir, *a, iv_phi, user_call_whitelist, seen))
             }
             ValueKind::Phi { args } => args
                 .iter()
@@ -684,7 +786,13 @@ fn is_loop_invariant_scalar_expr(
             | ValueKind::Indices { .. } => false,
         }
     }
-    rec(fn_ir, root, iv_phi, user_call_whitelist, &mut HashSet::new())
+    rec(
+        fn_ir,
+        root,
+        iv_phi,
+        user_call_whitelist,
+        &mut HashSet::new(),
+    )
 }
 
 fn is_vector_safe_call_chain_expr(
@@ -711,7 +819,9 @@ fn is_vector_safe_call_chain_expr(
         }
         match &fn_ir.values[root].kind {
             ValueKind::Const(_) | ValueKind::Load { .. } | ValueKind::Param { .. } => true,
-            ValueKind::Unary { rhs, .. } => rec(fn_ir, *rhs, iv_phi, _lp, user_call_whitelist, seen),
+            ValueKind::Unary { rhs, .. } => {
+                rec(fn_ir, *rhs, iv_phi, _lp, user_call_whitelist, seen)
+            }
             ValueKind::Binary { lhs, rhs, .. } => {
                 rec(fn_ir, *lhs, iv_phi, _lp, user_call_whitelist, seen)
                     && rec(fn_ir, *rhs, iv_phi, _lp, user_call_whitelist, seen)
@@ -741,7 +851,14 @@ fn is_vector_safe_call_chain_expr(
             ValueKind::Index2D { .. } => false,
         }
     }
-    rec(fn_ir, root, iv_phi, lp, user_call_whitelist, &mut HashSet::new())
+    rec(
+        fn_ir,
+        root,
+        iv_phi,
+        lp,
+        user_call_whitelist,
+        &mut HashSet::new(),
+    )
 }
 
 fn match_2d_row_map(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
@@ -760,7 +877,9 @@ fn match_2d_row_map(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
     for &bid in &lp.body {
         for instr in &fn_ir.blocks[bid].instrs {
             let (dest, row, col, rhs) = match instr {
-                Instr::StoreIndex2D { base, r, c, val, .. } => (*base, *r, *c, *val),
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => (*base, *r, *c, *val),
                 _ => continue,
             };
             if !is_loop_invariant_axis(fn_ir, row, iv_phi, dest) {
@@ -773,7 +892,10 @@ fn match_2d_row_map(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
             let ValueKind::Binary { op, lhs, rhs } = fn_ir.values[rhs].kind.clone() else {
                 continue;
             };
-            if !matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod) {
+            if !matches!(
+                op,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+            ) {
                 continue;
             }
             let lhs_src = match row_operand_source(fn_ir, lhs, row, iv_phi) {
@@ -815,7 +937,9 @@ fn match_2d_col_map(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
     for &bid in &lp.body {
         for instr in &fn_ir.blocks[bid].instrs {
             let (dest, row, col, rhs) = match instr {
-                Instr::StoreIndex2D { base, r, c, val, .. } => (*base, *r, *c, *val),
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => (*base, *r, *c, *val),
                 _ => continue,
             };
             if !is_loop_invariant_axis(fn_ir, col, iv_phi, dest) {
@@ -828,7 +952,10 @@ fn match_2d_col_map(fn_ir: &FnIR, lp: &LoopInfo) -> Option<VectorPlan> {
             let ValueKind::Binary { op, lhs, rhs } = fn_ir.values[rhs].kind.clone() else {
                 continue;
             };
-            if !matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod) {
+            if !matches!(
+                op,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+            ) {
                 continue;
             }
             let lhs_src = match col_operand_source(fn_ir, lhs, col, iv_phi) {
@@ -871,10 +998,17 @@ fn loop_is_simple_2d_map(fn_ir: &FnIR, lp: &LoopInfo) -> bool {
     true
 }
 
-fn row_operand_source(fn_ir: &FnIR, operand: ValueId, row: ValueId, iv_phi: ValueId) -> Option<ValueId> {
+fn row_operand_source(
+    fn_ir: &FnIR,
+    operand: ValueId,
+    row: ValueId,
+    iv_phi: ValueId,
+) -> Option<ValueId> {
     match &fn_ir.values[operand].kind {
         ValueKind::Index2D { base, r, c } => {
-            if is_iv_equivalent(fn_ir, *c, iv_phi) && same_loop_invariant_value(fn_ir, *r, row, iv_phi) {
+            if is_iv_equivalent(fn_ir, *c, iv_phi)
+                && same_loop_invariant_value(fn_ir, *r, row, iv_phi)
+            {
                 Some(canonical_value(fn_ir, *base))
             } else {
                 None
@@ -885,10 +1019,17 @@ fn row_operand_source(fn_ir: &FnIR, operand: ValueId, row: ValueId, iv_phi: Valu
     }
 }
 
-fn col_operand_source(fn_ir: &FnIR, operand: ValueId, col: ValueId, iv_phi: ValueId) -> Option<ValueId> {
+fn col_operand_source(
+    fn_ir: &FnIR,
+    operand: ValueId,
+    col: ValueId,
+    iv_phi: ValueId,
+) -> Option<ValueId> {
     match &fn_ir.values[operand].kind {
         ValueKind::Index2D { base, r, c } => {
-            if is_iv_equivalent(fn_ir, *r, iv_phi) && same_loop_invariant_value(fn_ir, *c, col, iv_phi) {
+            if is_iv_equivalent(fn_ir, *r, iv_phi)
+                && same_loop_invariant_value(fn_ir, *c, col, iv_phi)
+            {
                 Some(canonical_value(fn_ir, *base))
             } else {
                 None
@@ -906,7 +1047,9 @@ fn same_loop_invariant_value(fn_ir: &FnIR, a: ValueId, b: ValueId, iv_phi: Value
     if expr_has_iv_dependency(fn_ir, a, iv_phi) || expr_has_iv_dependency(fn_ir, b, iv_phi) {
         return false;
     }
-    if let (ValueKind::Const(ca), ValueKind::Const(cb)) = (&fn_ir.values[a].kind, &fn_ir.values[b].kind) {
+    if let (ValueKind::Const(ca), ValueKind::Const(cb)) =
+        (&fn_ir.values[a].kind, &fn_ir.values[b].kind)
+    {
         return ca == cb;
     }
     match (
@@ -949,7 +1092,13 @@ fn is_loop_invariant_axis(fn_ir: &FnIR, axis: ValueId, iv_phi: ValueId, dest: Va
 }
 
 fn as_safe_loop_index(fn_ir: &FnIR, vid: ValueId, iv_phi: ValueId) -> Option<ValueId> {
-    if let ValueKind::Index1D { base, idx, is_safe, is_na_safe } = &fn_ir.values[vid].kind {
+    if let ValueKind::Index1D {
+        base,
+        idx,
+        is_safe,
+        is_na_safe,
+    } = &fn_ir.values[vid].kind
+    {
         if is_iv_equivalent(fn_ir, *idx, iv_phi) && *is_safe && *is_na_safe {
             return Some(canonical_value(fn_ir, *base));
         }
@@ -959,15 +1108,31 @@ fn as_safe_loop_index(fn_ir: &FnIR, vid: ValueId, iv_phi: ValueId) -> Option<Val
 
 fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> bool {
     let preds = build_pred_map(fn_ir);
-    let outer_preds: Vec<BlockId> = preds.get(&lp.header).cloned().unwrap_or_default()
-        .into_iter().filter(|b| !lp.body.contains(b)).collect();
+    let outer_preds: Vec<BlockId> = preds
+        .get(&lp.header)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|b| !lp.body.contains(b))
+        .collect();
 
-    if outer_preds.len() != 1 { return false; }
+    if outer_preds.len() != 1 {
+        return false;
+    }
     let preheader = outer_preds[0];
-    let exit_bb = if lp.exits.len() == 1 { lp.exits[0] } else { return false; };
+    let exit_bb = if lp.exits.len() == 1 {
+        lp.exits[0]
+    } else {
+        return false;
+    };
 
     match plan {
-        VectorPlan::Reduce { kind, acc_phi, vec_expr, iv_phi } => {
+        VectorPlan::Reduce {
+            kind,
+            acc_phi,
+            vec_expr,
+            iv_phi,
+        } => {
             let func = match kind {
                 ReduceKind::Sum => "sum",
                 ReduceKind::Prod => "prod",
@@ -985,14 +1150,7 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
                     };
                     let mut memo = HashMap::new();
                     let input_vec = match materialize_vector_expr(
-                        fn_ir,
-                        vec_expr,
-                        iv_phi,
-                        idx_vec,
-                        lp,
-                        &mut memo,
-                        false,
-                        true,
+                        fn_ir, vec_expr, iv_phi, idx_vec, lp, &mut memo, false, true,
                     ) {
                         Some(v) => v,
                         None => return false,
@@ -1016,14 +1174,7 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
                 };
                 let mut memo = HashMap::new();
                 let input_vec = match materialize_vector_expr(
-                    fn_ir,
-                    vec_expr,
-                    iv_phi,
-                    idx_vec,
-                    lp,
-                    &mut memo,
-                    false,
-                    true,
+                    fn_ir, vec_expr, iv_phi, idx_vec, lp, &mut memo, false, true,
                 ) {
                     Some(v) => v,
                     None => return false,
@@ -1040,7 +1191,7 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
                     None,
                 )
             };
-            
+
             if let Some(acc_var) = fn_ir.values[acc_phi].origin_var.clone() {
                 fn_ir.blocks[preheader].instrs.push(Instr::Assign {
                     dst: acc_var.clone(),
@@ -1055,8 +1206,16 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             fn_ir.blocks[preheader].term = Terminator::Goto(exit_bb);
             true
         }
-        VectorPlan::Reduce2DRowSum { acc_phi, base, row, start, end } => {
-            let Some(acc_var) = fn_ir.values[acc_phi].origin_var.clone() else { return false };
+        VectorPlan::Reduce2DRowSum {
+            acc_phi,
+            base,
+            row,
+            start,
+            end,
+        } => {
+            let Some(acc_var) = fn_ir.values[acc_phi].origin_var.clone() else {
+                return false;
+            };
             let row_val = resolve_materialized_value(fn_ir, row);
             let reduce_val = fn_ir.add_value(
                 ValueKind::Call {
@@ -1077,8 +1236,16 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             fn_ir.blocks[preheader].term = Terminator::Goto(exit_bb);
             true
         }
-        VectorPlan::Reduce2DColSum { acc_phi, base, col, start, end } => {
-            let Some(acc_var) = fn_ir.values[acc_phi].origin_var.clone() else { return false };
+        VectorPlan::Reduce2DColSum {
+            acc_phi,
+            base,
+            col,
+            start,
+            end,
+        } => {
+            let Some(acc_var) = fn_ir.values[acc_phi].origin_var.clone() else {
+                return false;
+            };
             let col_val = resolve_materialized_value(fn_ir, col);
             let reduce_val = fn_ir.add_value(
                 ValueKind::Call {
@@ -1099,19 +1266,33 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             fn_ir.blocks[preheader].term = Terminator::Goto(exit_bb);
             true
         }
-        VectorPlan::Map { dest, src, op, other } => {
+        VectorPlan::Map {
+            dest,
+            src,
+            op,
+            other,
+        } => {
             // y = x * 2 is a binary operation on vectors in R
-            let map_kind = ValueKind::Binary { op, lhs: src, rhs: other };
-            let map_val = fn_ir.add_value(map_kind, crate::utils::Span::dummy(), crate::mir::def::Facts::empty(), None);
-            
+            let map_kind = ValueKind::Binary {
+                op,
+                lhs: src,
+                rhs: other,
+            };
+            let map_val = fn_ir.add_value(
+                map_kind,
+                crate::utils::Span::dummy(),
+                crate::mir::def::Facts::empty(),
+                None,
+            );
+
             if let Some(dest_var) = resolve_base_var(fn_ir, dest) {
                 let ret_name = dest_var.clone();
-                fn_ir.blocks[preheader].instrs.push(Instr::Assign { 
-                    dst: dest_var, 
-                    src: map_val, 
-                    span: crate::utils::Span::dummy() 
+                fn_ir.blocks[preheader].instrs.push(Instr::Assign {
+                    dst: dest_var,
+                    src: map_val,
+                    span: crate::utils::Span::dummy(),
                 });
-                
+
                 fn_ir.blocks[preheader].term = Terminator::Goto(exit_bb);
 
                 // If function exits return the destination variable directly,
@@ -1122,7 +1303,13 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             }
             false
         }
-        VectorPlan::CondMap { dest, cond, then_val, else_val, iv_phi } => {
+        VectorPlan::CondMap {
+            dest,
+            cond,
+            then_val,
+            else_val,
+            iv_phi,
+        } => {
             let idx_vec = match build_loop_index_vector(fn_ir, lp) {
                 Some(v) => v,
                 None => return false,
@@ -1130,40 +1317,19 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             let dest_ref = resolve_materialized_value(fn_ir, dest);
             let mut memo = HashMap::new();
             let cond_vec = match materialize_vector_expr(
-                fn_ir,
-                cond,
-                iv_phi,
-                idx_vec,
-                lp,
-                &mut memo,
-                true,
-                true,
+                fn_ir, cond, iv_phi, idx_vec, lp, &mut memo, true, true,
             ) {
                 Some(v) => v,
                 None => return false,
             };
             let then_vec = match materialize_vector_expr(
-                fn_ir,
-                then_val,
-                iv_phi,
-                idx_vec,
-                lp,
-                &mut memo,
-                true,
-                false,
+                fn_ir, then_val, iv_phi, idx_vec, lp, &mut memo, true, false,
             ) {
                 Some(v) => v,
                 None => return false,
             };
             let else_vec = match materialize_vector_expr(
-                fn_ir,
-                else_val,
-                iv_phi,
-                idx_vec,
-                lp,
-                &mut memo,
-                true,
-                false,
+                fn_ir, else_val, iv_phi, idx_vec, lp, &mut memo, true, false,
             ) {
                 Some(v) => v,
                 None => return false,
@@ -1216,7 +1382,9 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
                 crate::mir::def::Facts::empty(),
                 None,
             );
-            let Some(dest_var) = resolve_base_var(fn_ir, dest) else { return false };
+            let Some(dest_var) = resolve_base_var(fn_ir, dest) else {
+                return false;
+            };
             fn_ir.blocks[preheader].instrs.push(Instr::Assign {
                 dst: dest_var.clone(),
                 src: ifelse_val,
@@ -1226,8 +1394,16 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             rewrite_returns_for_var(fn_ir, &dest_var, ifelse_val);
             true
         }
-        VectorPlan::RecurrenceAddConst { base, start, end, delta, negate_delta } => {
-            let Some(base_var) = resolve_base_var(fn_ir, base) else { return false };
+        VectorPlan::RecurrenceAddConst {
+            base,
+            start,
+            end,
+            delta,
+            negate_delta,
+        } => {
+            let Some(base_var) = resolve_base_var(fn_ir, base) else {
+                return false;
+            };
             let delta_val = if negate_delta {
                 fn_ir.add_value(
                     ValueKind::Unary {
@@ -1267,7 +1443,9 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             end,
             offset,
         } => {
-            let Some(dest_var) = resolve_base_var(fn_ir, dest) else { return false };
+            let Some(dest_var) = resolve_base_var(fn_ir, dest) else {
+                return false;
+            };
             let src_start = add_int_offset(fn_ir, start, offset);
             let src_end = add_int_offset(fn_ir, end, offset);
             let shifted_val = fn_ir.add_value(
@@ -1289,8 +1467,15 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             rewrite_returns_for_var(fn_ir, &dest_var, shifted_val);
             true
         }
-        VectorPlan::CallMap { dest, callee, args, iv_phi } => {
-            let Some(dest_var) = resolve_base_var(fn_ir, dest) else { return false };
+        VectorPlan::CallMap {
+            dest,
+            callee,
+            args,
+            iv_phi,
+        } => {
+            let Some(dest_var) = resolve_base_var(fn_ir, dest) else {
+                return false;
+            };
             let idx_vec = match build_loop_index_vector(fn_ir, lp) {
                 Some(v) => v,
                 None => return false,
@@ -1301,14 +1486,7 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             for (arg_i, arg) in args.into_iter().enumerate() {
                 let out = if arg.vectorized {
                     match materialize_vector_expr(
-                        fn_ir,
-                        arg.value,
-                        iv_phi,
-                        idx_vec,
-                        lp,
-                        &mut memo,
-                        true,
-                        false,
+                        fn_ir, arg.value, iv_phi, idx_vec, lp, &mut memo, true, false,
                     ) {
                         Some(v) => v,
                         None => return false,
@@ -1415,7 +1593,9 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             rhs_src,
             op,
         } => {
-            let Some(dest_var) = resolve_base_var(fn_ir, dest) else { return false };
+            let Some(dest_var) = resolve_base_var(fn_ir, dest) else {
+                return false;
+            };
             let op_sym = match op {
                 BinOp::Add => "+",
                 BinOp::Sub => "-",
@@ -1459,7 +1639,9 @@ fn apply_vectorization(fn_ir: &mut FnIR, lp: &LoopInfo, plan: VectorPlan) -> boo
             rhs_src,
             op,
         } => {
-            let Some(dest_var) = resolve_base_var(fn_ir, dest) else { return false };
+            let Some(dest_var) = resolve_base_var(fn_ir, dest) else {
+                return false;
+            };
             let op_sym = match op {
                 BinOp::Add => "+",
                 BinOp::Sub => "-",
@@ -1577,7 +1759,11 @@ fn affine_iv_offset(fn_ir: &FnIR, idx: ValueId, iv_phi: ValueId) -> Option<i64> 
         return Some(0);
     }
     match &fn_ir.values[idx].kind {
-        ValueKind::Binary { op: BinOp::Add, lhs, rhs } => {
+        ValueKind::Binary {
+            op: BinOp::Add,
+            lhs,
+            rhs,
+        } => {
             if is_iv_equivalent(fn_ir, *lhs, iv_phi) {
                 if let ValueKind::Const(Lit::Int(k)) = fn_ir.values[*rhs].kind {
                     return Some(k);
@@ -1590,7 +1776,11 @@ fn affine_iv_offset(fn_ir: &FnIR, idx: ValueId, iv_phi: ValueId) -> Option<i64> 
             }
             None
         }
-        ValueKind::Binary { op: BinOp::Sub, lhs, rhs } => {
+        ValueKind::Binary {
+            op: BinOp::Sub,
+            lhs,
+            rhs,
+        } => {
             if is_iv_equivalent(fn_ir, *lhs, iv_phi) {
                 if let ValueKind::Const(Lit::Int(k)) = fn_ir.values[*rhs].kind {
                     return Some(-k);
@@ -1638,7 +1828,10 @@ fn loop_matches_vec(lp: &LoopInfo, fn_ir: &FnIR, base: ValueId) -> bool {
         return true;
     }
     if let Some(loop_base) = lp.is_seq_along {
-        if let (Some(a), Some(b)) = (resolve_base_var(fn_ir, base), resolve_base_var(fn_ir, loop_base)) {
+        if let (Some(a), Some(b)) = (
+            resolve_base_var(fn_ir, base),
+            resolve_base_var(fn_ir, loop_base),
+        ) {
             if a == b {
                 return true;
             }
@@ -1649,7 +1842,10 @@ fn loop_matches_vec(lp: &LoopInfo, fn_ir: &FnIR, base: ValueId) -> bool {
             if canonical_value(fn_ir, len_base) == base {
                 return true;
             }
-            if let (Some(a), Some(b)) = (resolve_base_var(fn_ir, base), resolve_base_var(fn_ir, len_base)) {
+            if let (Some(a), Some(b)) = (
+                resolve_base_var(fn_ir, base),
+                resolve_base_var(fn_ir, len_base),
+            ) {
                 if a == b {
                     return true;
                 }
@@ -1662,7 +1858,10 @@ fn loop_matches_vec(lp: &LoopInfo, fn_ir: &FnIR, base: ValueId) -> bool {
 fn loop_has_store_effect(fn_ir: &FnIR, lp: &LoopInfo) -> bool {
     for &bid in &lp.body {
         for instr in &fn_ir.blocks[bid].instrs {
-            if matches!(instr, Instr::StoreIndex1D { .. } | Instr::StoreIndex2D { .. }) {
+            if matches!(
+                instr,
+                Instr::StoreIndex1D { .. } | Instr::StoreIndex2D { .. }
+            ) {
                 return true;
             }
         }
@@ -1687,7 +1886,11 @@ fn rewrite_returns_for_var(fn_ir: &mut FnIR, var: &str, new_val: ValueId) {
     }
 }
 
-fn extract_store_1d_in_block(fn_ir: &FnIR, bid: BlockId, iv_phi: ValueId) -> Option<(ValueId, ValueId)> {
+fn extract_store_1d_in_block(
+    fn_ir: &FnIR,
+    bid: BlockId,
+    iv_phi: ValueId,
+) -> Option<(ValueId, ValueId)> {
     let mut found = None;
     for instr in &fn_ir.blocks[bid].instrs {
         let Instr::StoreIndex1D {
@@ -1696,7 +1899,10 @@ fn extract_store_1d_in_block(fn_ir: &FnIR, bid: BlockId, iv_phi: ValueId) -> Opt
             val,
             is_vector,
             ..
-        } = instr else { continue };
+        } = instr
+        else {
+            continue;
+        };
         if *is_vector || !is_iv_equivalent(fn_ir, *idx, iv_phi) {
             continue;
         }
@@ -1725,10 +1931,18 @@ fn is_iv_minus_one(fn_ir: &FnIR, idx: ValueId, iv_phi: ValueId) -> bool {
         return false;
     }
     match &fn_ir.values[idx].kind {
-        ValueKind::Binary { op: BinOp::Sub, lhs, rhs } if is_iv_equivalent(fn_ir, *lhs, iv_phi) => {
+        ValueKind::Binary {
+            op: BinOp::Sub,
+            lhs,
+            rhs,
+        } if is_iv_equivalent(fn_ir, *lhs, iv_phi) => {
             matches!(fn_ir.values[*rhs].kind, ValueKind::Const(Lit::Int(1)))
         }
-        ValueKind::Binary { op: BinOp::Add, lhs, rhs } if is_iv_equivalent(fn_ir, *lhs, iv_phi) => {
+        ValueKind::Binary {
+            op: BinOp::Add,
+            lhs,
+            rhs,
+        } if is_iv_equivalent(fn_ir, *lhs, iv_phi) => {
             matches!(fn_ir.values[*rhs].kind, ValueKind::Const(Lit::Int(-1)))
         }
         _ => false,
@@ -1749,15 +1963,25 @@ fn expr_reads_base(fn_ir: &FnIR, root: ValueId, base: ValueId) -> bool {
             _ => {}
         }
         match &fn_ir.values[root].kind {
-            ValueKind::Binary { lhs, rhs, .. } => rec(fn_ir, *lhs, base, seen) || rec(fn_ir, *rhs, base, seen),
+            ValueKind::Binary { lhs, rhs, .. } => {
+                rec(fn_ir, *lhs, base, seen) || rec(fn_ir, *rhs, base, seen)
+            }
             ValueKind::Unary { rhs, .. } => rec(fn_ir, *rhs, base, seen),
             ValueKind::Call { args, .. } => args.iter().any(|a| rec(fn_ir, *a, base, seen)),
             ValueKind::Phi { args } => args.iter().any(|(a, _)| rec(fn_ir, *a, base, seen)),
-            ValueKind::Len { base: b } | ValueKind::Indices { base: b } => rec(fn_ir, *b, base, seen),
-            ValueKind::Range { start, end } => rec(fn_ir, *start, base, seen) || rec(fn_ir, *end, base, seen),
-            ValueKind::Index1D { base: b, idx, .. } => rec(fn_ir, *b, base, seen) || rec(fn_ir, *idx, base, seen),
+            ValueKind::Len { base: b } | ValueKind::Indices { base: b } => {
+                rec(fn_ir, *b, base, seen)
+            }
+            ValueKind::Range { start, end } => {
+                rec(fn_ir, *start, base, seen) || rec(fn_ir, *end, base, seen)
+            }
+            ValueKind::Index1D { base: b, idx, .. } => {
+                rec(fn_ir, *b, base, seen) || rec(fn_ir, *idx, base, seen)
+            }
             ValueKind::Index2D { base: b, r, c } => {
-                rec(fn_ir, *b, base, seen) || rec(fn_ir, *r, base, seen) || rec(fn_ir, *c, base, seen)
+                rec(fn_ir, *b, base, seen)
+                    || rec(fn_ir, *r, base, seen)
+                    || rec(fn_ir, *c, base, seen)
             }
             _ => false,
         }
@@ -1774,14 +1998,22 @@ fn expr_has_iv_dependency(fn_ir: &FnIR, root: ValueId, iv_phi: ValueId) -> bool 
             return false;
         }
         match &fn_ir.values[root].kind {
-            ValueKind::Binary { lhs, rhs, .. } => rec(fn_ir, *lhs, iv_phi, seen) || rec(fn_ir, *rhs, iv_phi, seen),
+            ValueKind::Binary { lhs, rhs, .. } => {
+                rec(fn_ir, *lhs, iv_phi, seen) || rec(fn_ir, *rhs, iv_phi, seen)
+            }
             ValueKind::Unary { rhs, .. } => rec(fn_ir, *rhs, iv_phi, seen),
             ValueKind::Call { args, .. } => args.iter().any(|a| rec(fn_ir, *a, iv_phi, seen)),
             ValueKind::Phi { args } => args.iter().any(|(a, _)| rec(fn_ir, *a, iv_phi, seen)),
-            ValueKind::Len { base } | ValueKind::Indices { base } => rec(fn_ir, *base, iv_phi, seen),
-            ValueKind::Range { start, end } => rec(fn_ir, *start, iv_phi, seen) || rec(fn_ir, *end, iv_phi, seen),
+            ValueKind::Len { base } | ValueKind::Indices { base } => {
+                rec(fn_ir, *base, iv_phi, seen)
+            }
+            ValueKind::Range { start, end } => {
+                rec(fn_ir, *start, iv_phi, seen) || rec(fn_ir, *end, iv_phi, seen)
+            }
             ValueKind::Index1D { idx, .. } => rec(fn_ir, *idx, iv_phi, seen),
-            ValueKind::Index2D { r, c, .. } => rec(fn_ir, *r, iv_phi, seen) || rec(fn_ir, *c, iv_phi, seen),
+            ValueKind::Index2D { r, c, .. } => {
+                rec(fn_ir, *r, iv_phi, seen) || rec(fn_ir, *c, iv_phi, seen)
+            }
             _ => false,
         }
     }
@@ -1814,14 +2046,43 @@ fn is_vectorizable_expr(
         match &fn_ir.values[root].kind {
             ValueKind::Const(_) | ValueKind::Load { .. } | ValueKind::Param { .. } => true,
             ValueKind::Binary { lhs, rhs, .. } => {
-                rec(fn_ir, *lhs, iv_phi, lp, allow_any_base, require_safe_index, seen)
-                    && rec(fn_ir, *rhs, iv_phi, lp, allow_any_base, require_safe_index, seen)
+                rec(
+                    fn_ir,
+                    *lhs,
+                    iv_phi,
+                    lp,
+                    allow_any_base,
+                    require_safe_index,
+                    seen,
+                ) && rec(
+                    fn_ir,
+                    *rhs,
+                    iv_phi,
+                    lp,
+                    allow_any_base,
+                    require_safe_index,
+                    seen,
+                )
             }
-            ValueKind::Unary { rhs, .. } => {
-                rec(fn_ir, *rhs, iv_phi, lp, allow_any_base, require_safe_index, seen)
-            }
+            ValueKind::Unary { rhs, .. } => rec(
+                fn_ir,
+                *rhs,
+                iv_phi,
+                lp,
+                allow_any_base,
+                require_safe_index,
+                seen,
+            ),
             ValueKind::Call { args, .. } => args.iter().all(|a| {
-                rec(fn_ir, *a, iv_phi, lp, allow_any_base, require_safe_index, seen)
+                rec(
+                    fn_ir,
+                    *a,
+                    iv_phi,
+                    lp,
+                    allow_any_base,
+                    require_safe_index,
+                    seen,
+                )
             }),
             ValueKind::Index1D {
                 base,
@@ -1834,14 +2095,43 @@ fn is_vectorizable_expr(
                     && (allow_any_base || is_loop_compatible_base(lp, fn_ir, *base))
             }
             ValueKind::Phi { args } => args.iter().all(|(a, _)| {
-                rec(fn_ir, *a, iv_phi, lp, allow_any_base, require_safe_index, seen)
+                rec(
+                    fn_ir,
+                    *a,
+                    iv_phi,
+                    lp,
+                    allow_any_base,
+                    require_safe_index,
+                    seen,
+                )
             }),
-            ValueKind::Len { base } | ValueKind::Indices { base } => {
-                rec(fn_ir, *base, iv_phi, lp, allow_any_base, require_safe_index, seen)
-            }
+            ValueKind::Len { base } | ValueKind::Indices { base } => rec(
+                fn_ir,
+                *base,
+                iv_phi,
+                lp,
+                allow_any_base,
+                require_safe_index,
+                seen,
+            ),
             ValueKind::Range { start, end } => {
-                rec(fn_ir, *start, iv_phi, lp, allow_any_base, require_safe_index, seen)
-                    && rec(fn_ir, *end, iv_phi, lp, allow_any_base, require_safe_index, seen)
+                rec(
+                    fn_ir,
+                    *start,
+                    iv_phi,
+                    lp,
+                    allow_any_base,
+                    require_safe_index,
+                    seen,
+                ) && rec(
+                    fn_ir,
+                    *end,
+                    iv_phi,
+                    lp,
+                    allow_any_base,
+                    require_safe_index,
+                    seen,
+                )
             }
             _ => false,
         }
@@ -2001,7 +2291,11 @@ fn materialize_vector_expr(
                 fn_ir.add_value(ValueKind::Unary { op, rhs: r }, span, facts, None)
             }
         }
-        ValueKind::Call { callee, args, names } => {
+        ValueKind::Call {
+            callee,
+            args,
+            names,
+        } => {
             let mut new_args = Vec::with_capacity(args.len());
             let mut changed = false;
             for a in args {
@@ -2160,7 +2454,9 @@ fn is_loop_compatible_base(lp: &LoopInfo, fn_ir: &FnIR, base: ValueId) -> bool {
     if loop_matches_vec(lp, fn_ir, base) {
         return true;
     }
-    let Some(loop_key) = loop_length_key(lp, fn_ir) else { return false };
+    let Some(loop_key) = loop_length_key(lp, fn_ir) else {
+        return false;
+    };
     match vector_length_key(fn_ir, base) {
         Some(k) => canonical_value(fn_ir, k) == canonical_value(fn_ir, loop_key),
         None => false,
@@ -2180,7 +2476,9 @@ fn vector_length_key(fn_ir: &FnIR, root: ValueId) -> Option<ValueId> {
         let mut src: Option<ValueId> = None;
         for bb in &fn_ir.blocks {
             for ins in &bb.instrs {
-                let Instr::Assign { dst, src: s, .. } = ins else { continue };
+                let Instr::Assign { dst, src: s, .. } = ins else {
+                    continue;
+                };
                 if dst != var {
                     continue;
                 }
@@ -2212,7 +2510,9 @@ fn vector_length_key(fn_ir: &FnIR, root: ValueId) -> Option<ValueId> {
                 let lk = rec(fn_ir, *lhs, seen);
                 let rk = rec(fn_ir, *rhs, seen);
                 match (lk, rk) {
-                    (Some(a), Some(b)) if canonical_value(fn_ir, a) == canonical_value(fn_ir, b) => {
+                    (Some(a), Some(b))
+                        if canonical_value(fn_ir, a) == canonical_value(fn_ir, b) =>
+                    {
                         Some(canonical_value(fn_ir, a))
                     }
                     (Some(k), None) if is_scalar_value(fn_ir, *rhs) => Some(k),
@@ -2381,7 +2681,9 @@ fn resolve_load_alias_value(fn_ir: &FnIR, vid: ValueId) -> ValueId {
         let mut src: Option<ValueId> = None;
         for bb in &fn_ir.blocks {
             for ins in &bb.instrs {
-                let Instr::Assign { dst, src: s, .. } = ins else { continue };
+                let Instr::Assign { dst, src: s, .. } = ins else {
+                    continue;
+                };
                 if dst != var {
                     continue;
                 }

@@ -49,8 +49,15 @@ fn main() {
 main();
 "#;
     let (ok, stdout, _stderr) = run_compile(src, "same_line_missing_semi.rr");
-    assert!(!ok, "compile must fail when same-line statement separator is missing");
-    assert!(stdout.contains("Missing ';'"), "missing semicolon diagnostic:\n{}", stdout);
+    assert!(
+        !ok,
+        "compile must fail when same-line statement separator is missing"
+    );
+    assert!(
+        stdout.contains("Missing ';'"),
+        "missing semicolon diagnostic:\n{}",
+        stdout
+    );
 }
 
 #[test]

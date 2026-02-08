@@ -71,7 +71,10 @@ fn comprehensive_script_is_opt_level_equivalent() {
     };
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let rr_path = root.join("tests").join("golden").join("records_lambda_pipe_try.rr");
+    let rr_path = root
+        .join("tests")
+        .join("golden")
+        .join("records_lambda_pipe_try.rr");
     assert!(
         rr_path.exists(),
         "missing test script: {}",
@@ -94,8 +97,14 @@ fn comprehensive_script_is_opt_level_equivalent() {
     let run_o1 = run_rscript(&rscript, &o1);
     let run_o2 = run_rscript(&rscript, &o2);
 
-    assert_eq!(base.status, run_o1.status, "status mismatch between O0 and O1");
-    assert_eq!(base.status, run_o2.status, "status mismatch between O0 and O2");
+    assert_eq!(
+        base.status, run_o1.status,
+        "status mismatch between O0 and O1"
+    );
+    assert_eq!(
+        base.status, run_o2.status,
+        "status mismatch between O0 and O2"
+    );
     assert_eq!(
         normalize(&base.stdout),
         normalize(&run_o1.stdout),
@@ -117,7 +126,10 @@ fn comprehensive_script_is_opt_level_equivalent() {
         "stderr mismatch between O0 and O2"
     );
 
-    assert!(!base.stdout.is_empty(), "baseline output should not be empty");
+    assert!(
+        !base.stdout.is_empty(),
+        "baseline output should not be empty"
+    );
     assert!(
         base.stdout.contains("[1] 52"),
         "expected deterministic final checksum marker in output"

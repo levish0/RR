@@ -1,4 +1,4 @@
-﻿use crate::mir::*;
+use crate::mir::*;
 use crate::syntax::ast::Lit;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,9 +51,7 @@ pub fn compute_na_states(fn_ir: &FnIR) -> Vec<NaState> {
                 ValueKind::Const(Lit::Na) => NaState::Always,
                 ValueKind::Const(_) => NaState::Never,
                 ValueKind::Len { .. } | ValueKind::Indices { .. } => NaState::Never,
-                ValueKind::Range { start, end } => {
-                    NaState::propagate(states[*start], states[*end])
-                }
+                ValueKind::Range { start, end } => NaState::propagate(states[*start], states[*end]),
                 ValueKind::Binary { lhs, rhs, .. } => {
                     NaState::propagate(states[*lhs], states[*rhs])
                 }
@@ -74,9 +72,7 @@ pub fn compute_na_states(fn_ir: &FnIR) -> Vec<NaState> {
                     // Indexing can always produce NA depending on contents.
                     NaState::Maybe
                 }
-                ValueKind::Call { callee, args, .. } => {
-                    call_na_behavior(callee, args, &states)
-                }
+                ValueKind::Call { callee, args, .. } => call_na_behavior(callee, args, &states),
                 ValueKind::Param { .. } | ValueKind::Load { .. } => NaState::Maybe,
             };
 
@@ -99,28 +95,16 @@ fn call_na_behavior(callee: &str, args: &[ValueId], states: &[NaState]) -> NaSta
 
     // Functions that propagate NA from their arguments.
     match callee {
-        "abs" | "sqrt" | "sin" | "cos" | "tan" | "log" | "exp" | "floor" | "ceiling" | "round" | "trunc" => {
+        "abs" | "sqrt" | "sin" | "cos" | "tan" | "log" | "exp" | "floor" | "ceiling" | "round"
+        | "trunc" => {
             let mut acc = NaState::Never;
             for a in args {
                 acc = NaState::propagate(acc, states[*a]);
             }
             return acc;
         }
-        "c"
-        | "sum"
-        | "mean"
-        | "var"
-        | "sd"
-        | "min"
-        | "max"
-        | "prod"
-        | "rr_row_sum_range"
-        | "rr_col_sum_range"
-        | "colSums"
-        | "rowSums"
-        | "%*%"
-        | "crossprod"
-        | "tcrossprod" => {
+        "c" | "sum" | "mean" | "var" | "sd" | "min" | "max" | "prod" | "rr_row_sum_range"
+        | "rr_col_sum_range" | "colSums" | "rowSums" | "%*%" | "crossprod" | "tcrossprod" => {
             let mut acc = NaState::Never;
             for a in args {
                 acc = NaState::propagate(acc, states[*a]);

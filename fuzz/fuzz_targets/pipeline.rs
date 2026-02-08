@@ -79,8 +79,12 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
 
-    let _ = RR::mir::semantics::validate_program(&all_fns);
-    let _ = RR::mir::semantics::validate_runtime_safety(&all_fns);
+    if RR::mir::semantics::validate_program(&all_fns).is_err() {
+        return;
+    }
+    if RR::mir::semantics::validate_runtime_safety(&all_fns).is_err() {
+        return;
+    }
 
     let mut optimized = all_fns;
     TachyonEngine::new().stabilize_for_codegen(&mut optimized);
@@ -90,4 +94,3 @@ fuzz_target!(|data: &[u8]| {
         let _ = emitter.emit(fn_ir);
     }
 });
-

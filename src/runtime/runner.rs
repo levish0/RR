@@ -1,27 +1,37 @@
-﻿use crate::codegen::mir_emit::MapEntry;
-use std::process::Command;
-use std::io::Write;
-use std::io::IsTerminal;
-use std::fs;
+use crate::codegen::mir_emit::MapEntry;
 use std::env;
+use std::fs;
+use std::io::IsTerminal;
+use std::io::Write;
+use std::process::Command;
 
 use regex::Regex;
 
 pub struct Runner;
 
 impl Runner {
-    pub fn run(source_path: &str, _source_src: &str, r_code: &str, source_map: &[MapEntry], rscript_path: Option<&str>, keep_r: bool) -> i32 {
+    pub fn run(
+        source_path: &str,
+        _source_src: &str,
+        r_code: &str,
+        source_map: &[MapEntry],
+        rscript_path: Option<&str>,
+        keep_r: bool,
+    ) -> i32 {
         let color = color_enabled_stderr();
         let runner_color = palette_for_module("RR.RunnerError");
         let gen_path = source_path.replace(".rr", ".gen.R");
-        
+
         if let Err(e) = fs::write(&gen_path, r_code) {
             eprintln!(
                 "{}",
                 style(
                     color,
                     runner_color,
-                    &format!("** (RR.RunnerError) {}: failed to write generated R file: {}", source_path, e),
+                    &format!(
+                        "** (RR.RunnerError) {}: failed to write generated R file: {}",
+                        source_path, e
+                    ),
                 )
             );
             return 1;
@@ -60,7 +70,7 @@ impl Runner {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stderr.is_empty() {
             let rr_re = Regex::new(r"RR:(\d+):(\d+):").unwrap();
-            let r_loc_re = Regex::new(r"([^:\s]+):(\d+):(\d+):").unwrap(); 
+            let r_loc_re = Regex::new(r"([^:\s]+):(\d+):(\d+):").unwrap();
             let rrdiag_re = Regex::new(r"^RRDIAG\|(.+)$").unwrap();
             let rr_code_re = Regex::new(r"error\[(ICE\d+|E\d+)\]").unwrap();
             let mut active_module_color = palette_for_module("RR.RuntimeError");
@@ -83,13 +93,15 @@ impl Runner {
                     // Skip machine-readable diagnostic line in user output.
                     processed = true;
                 }
-                
-                if processed { continue; }
-                
+
+                if processed {
+                    continue;
+                }
+
                 // 1) RR runtime error: RR:line:col:
                 if let Some(cap) = rr_re.captures(line) {
                     let rr_line: u32 = cap[1].parse().unwrap_or(0);
-                    let rr_col: u32  = cap[2].parse().unwrap_or(0);
+                    let rr_col: u32 = cap[2].parse().unwrap_or(0);
                     eprintln!(
                         "{}",
                         style(
@@ -101,15 +113,17 @@ impl Runner {
                     processed = true;
                 }
 
-                if processed { continue; }
+                if processed {
+                    continue;
+                }
 
                 // 2) R parse/syntax error: file:line:col:
                 if let Some(cap) = r_loc_re.captures(line) {
                     let file = &cap[1];
                     let r_line: u32 = cap[2].parse().unwrap_or(0);
-                    
+
                     if file.ends_with(".gen.R") || file.ends_with(".R") {
-                         // Find closest RR span
+                        // Find closest RR span
                         if let Some(entry) = Self::find_mapping(r_line, source_map) {
                             eprintln!(
                                 "{}",
@@ -118,7 +132,11 @@ impl Runner {
                                     active_module_color,
                                     &format!(
                                         "{}:{}:{}: (R {}): {}",
-                                        source_path, entry.rr_span.start_line, entry.rr_span.start_col, r_line, line
+                                        source_path,
+                                        entry.rr_span.start_line,
+                                        entry.rr_span.start_col,
+                                        r_line,
+                                        line
                                     ),
                                 )
                             );
@@ -126,7 +144,7 @@ impl Runner {
                         }
                     }
                 }
-                
+
                 if !processed {
                     let code = if line.starts_with("warning[")
                         || line.starts_with("Warning:")
@@ -134,7 +152,10 @@ impl Runner {
                         || line.contains(" warning[")
                     {
                         "1;38;5;208"
-                    } else if line.starts_with("In:") || line.starts_with("Hint:") || line.starts_with("note (R):") {
+                    } else if line.starts_with("In:")
+                        || line.starts_with("Hint:")
+                        || line.starts_with("note (R):")
+                    {
                         "1;93"
                     } else if line.starts_with("stacktrace:") || line.contains("(rr)") {
                         "2"
@@ -159,8 +180,8 @@ impl Runner {
 
     fn find_mapping(r_line: u32, map: &[MapEntry]) -> Option<&MapEntry> {
         map.iter()
-           .filter(|e| e.r_line <= r_line)
-           .max_by_key(|e| e.r_line)
+            .filter(|e| e.r_line <= r_line)
+            .max_by_key(|e| e.r_line)
     }
 }
 

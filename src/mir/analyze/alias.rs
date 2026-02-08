@@ -1,4 +1,3 @@
-﻿
 use crate::mir::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -44,8 +43,7 @@ pub fn aliases(a: &AliasClass, b: &AliasClass) -> bool {
 fn call_returns_fresh(callee: &str) -> bool {
     matches!(
         callee,
-        "c"
-            | "seq_len"
+        "c" | "seq_len"
             | "seq_along"
             | "rr_indices"
             | "rr_range"

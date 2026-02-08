@@ -1,6 +1,6 @@
-﻿use crate::syntax::ast;
-use crate::hir::def::*;
 use crate::error::{RR, RRCode, RRException, Stage};
+use crate::hir::def::*;
+use crate::syntax::ast;
 use crate::utils::Span;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -11,13 +11,13 @@ pub struct Lowerer {
     scopes: Vec<HashMap<String, LocalId>>,
     next_local_id: u32,
     next_sym_id: u32,
-    
+
     // Context flags
     in_tidy: bool,
-    
+
     // Mapping for current function's locals
     local_names: HashMap<LocalId, String>,
-    
+
     // Global Symbol Table
     symbols: HashMap<SymbolId, String>,
     // Collected lowering warnings (reported by caller)
@@ -46,7 +46,10 @@ impl Lowerer {
 
     fn env_truthy(key: &str) -> bool {
         match env::var(key) {
-            Ok(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+            Ok(v) => matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            ),
             Err(_) => false,
         }
     }
@@ -54,7 +57,7 @@ impl Lowerer {
     pub fn take_warnings(&mut self) -> Vec<String> {
         std::mem::take(&mut self.warnings)
     }
-    
+
     // Persistent symbol table
     pub fn get_symbols(&self) -> HashMap<SymbolId, String> {
         self.symbols.clone()
@@ -86,7 +89,7 @@ impl Lowerer {
         }
         None
     }
-    
+
     fn intern_symbol(&mut self, name: &str) -> SymbolId {
         // Proper interning: check existing
         for (id, existing_name) in &self.symbols {
@@ -121,7 +124,11 @@ impl Lowerer {
         }
     }
 
-    fn collect_lambda_captures(&self, params: &[String], body: &ast::Block) -> Vec<(String, LocalId)> {
+    fn collect_lambda_captures(
+        &self,
+        params: &[String],
+        body: &ast::Block,
+    ) -> Vec<(String, LocalId)> {
         fn in_scopes(scopes: &[HashSet<String>], name: &str) -> bool {
             scopes.iter().rev().any(|s| s.contains(name))
         }
@@ -174,7 +181,9 @@ impl Lowerer {
         ) {
             match &expr.kind {
                 ast::ExprKind::Name(n) => record_capture(lowerer, scopes, seen, captures, n),
-                ast::ExprKind::Unary { rhs, .. } => visit_expr(lowerer, scopes, seen, captures, rhs),
+                ast::ExprKind::Unary { rhs, .. } => {
+                    visit_expr(lowerer, scopes, seen, captures, rhs)
+                }
                 ast::ExprKind::Binary { lhs, rhs, .. } => {
                     visit_expr(lowerer, scopes, seen, captures, lhs);
                     visit_expr(lowerer, scopes, seen, captures, rhs);
@@ -189,14 +198,18 @@ impl Lowerer {
                         visit_expr(lowerer, scopes, seen, captures, a);
                     }
                 }
-                ast::ExprKind::NamedArg { value, .. } => visit_expr(lowerer, scopes, seen, captures, value),
+                ast::ExprKind::NamedArg { value, .. } => {
+                    visit_expr(lowerer, scopes, seen, captures, value)
+                }
                 ast::ExprKind::Index { base, idx } => {
                     visit_expr(lowerer, scopes, seen, captures, base);
                     for i in idx {
                         visit_expr(lowerer, scopes, seen, captures, i);
                     }
                 }
-                ast::ExprKind::Field { base, .. } => visit_expr(lowerer, scopes, seen, captures, base),
+                ast::ExprKind::Field { base, .. } => {
+                    visit_expr(lowerer, scopes, seen, captures, base)
+                }
                 ast::ExprKind::VectorLit(xs) => {
                     for x in xs {
                         visit_expr(lowerer, scopes, seen, captures, x);
@@ -276,7 +289,11 @@ impl Lowerer {
                         }
                     }
                 }
-                ast::StmtKind::If { cond, then_blk, else_blk } => {
+                ast::StmtKind::If {
+                    cond,
+                    then_blk,
+                    else_blk,
+                } => {
                     visit_expr(lowerer, scopes, seen, captures, cond);
                     scopes.push(HashSet::new());
                     visit_block(lowerer, scopes, seen, captures, then_blk);
@@ -336,7 +353,12 @@ impl Lowerer {
         captures
     }
 
-    fn lower_lambda_expr(&mut self, params: Vec<String>, body: ast::Block, span: Span) -> RR<HirExpr> {
+    fn lower_lambda_expr(
+        &mut self,
+        params: Vec<String>,
+        body: ast::Block,
+        span: Span,
+    ) -> RR<HirExpr> {
         let captures = self.collect_lambda_captures(&params, &body);
         let lambda_name = self.alloc_lambda_name();
         let lambda_sym = self.intern_symbol(&lambda_name);
@@ -408,7 +430,11 @@ impl Lowerer {
         }))
     }
 
-    pub fn lower_module(&mut self, prog: ast::Program, mod_id: ModuleId) -> RR<(HirModule, HashMap<SymbolId, String>)> {
+    pub fn lower_module(
+        &mut self,
+        prog: ast::Program,
+        mod_id: ModuleId,
+    ) -> RR<(HirModule, HashMap<SymbolId, String>)> {
         let mut items = Vec::new();
         // println!("Lowering module {:?} with {} statements", mod_id, prog.stmts.len());
         for stmt in prog.stmts {
@@ -416,24 +442,25 @@ impl Lowerer {
             // For now, treat everything as Item::Stmt unless it's a FnDecl
             match stmt.kind {
                 ast::StmtKind::FnDecl { name, params, body } => {
-                     let fn_item = self.lower_fn(name, params, body, stmt.span)?;
-                     items.push(HirItem::Fn(fn_item));
-                     self.flush_pending_fns(&mut items);
+                    let fn_item = self.lower_fn(name, params, body, stmt.span)?;
+                    items.push(HirItem::Fn(fn_item));
+                    self.flush_pending_fns(&mut items);
                 }
                 ast::StmtKind::Import(path) => {
-                    let import = HirImport { 
-                        module: path, 
-                        spec: HirImportSpec::Glob, 
-                        span: stmt.span 
+                    let import = HirImport {
+                        module: path,
+                        spec: HirImportSpec::Glob,
+                        span: stmt.span,
                     };
                     items.push(HirItem::Import(import));
                     self.flush_pending_fns(&mut items);
                 }
                 ast::StmtKind::Export(fndecl) => {
-                     let mut fn_item = self.lower_fn(fndecl.name, fndecl.params, fndecl.body, stmt.span)?;
-                     fn_item.public = true;
-                     items.push(HirItem::Fn(fn_item));
-                     self.flush_pending_fns(&mut items);
+                    let mut fn_item =
+                        self.lower_fn(fndecl.name, fndecl.params, fndecl.body, stmt.span)?;
+                    fn_item.public = true;
+                    items.push(HirItem::Fn(fn_item));
+                    self.flush_pending_fns(&mut items);
                 }
                 _ => {
                     let s = self.lower_stmt(stmt)?;
@@ -442,19 +469,28 @@ impl Lowerer {
                 }
             }
         }
-        
+
         let symbols = self.symbols.clone();
-        Ok((HirModule {
-            id: mod_id, 
-            path: vec![],
-            items,
-        }, symbols))
+        Ok((
+            HirModule {
+                id: mod_id,
+                path: vec![],
+                items,
+            },
+            symbols,
+        ))
     }
-    
-    fn lower_fn(&mut self, name: String, params: Vec<String>, body: ast::Block, span: Span) -> RR<HirFn> {
+
+    fn lower_fn(
+        &mut self,
+        name: String,
+        params: Vec<String>,
+        body: ast::Block,
+        span: Span,
+    ) -> RR<HirFn> {
         let fn_id = self.alloc_fn_id();
         let sym_name = self.intern_symbol(&name);
-        
+
         self.enter_scope();
         let mut hir_params = Vec::new();
         for p in params {
@@ -467,18 +503,18 @@ impl Lowerer {
                 span, // Param span?
             });
         }
-        
+
         let hir_body = self.lower_block(body)?;
         self.exit_scope();
-        
+
         let local_names = self.local_names.drain().collect();
-        
+
         // These variables are not defined in the original code,
         // but the instruction implies they should be used as variables.
         // To maintain syntactic correctness, we'll define them with their original literal values.
         let has_varargs = false;
         let ret_ty = None;
-        
+
         Ok(HirFn {
             id: fn_id,
             name: sym_name,
@@ -486,21 +522,27 @@ impl Lowerer {
             has_varargs,
             ret_ty,
             body: hir_body,
-            attrs: HirFnAttrs { inline_hint: InlineHint::Default, tidy_safe: false },
+            attrs: HirFnAttrs {
+                inline_hint: InlineHint::Default,
+                tidy_safe: false,
+            },
             span,
             local_names,
             public: false, // Default private
         })
     }
-    
+
     fn lower_block(&mut self, block: ast::Block) -> RR<HirBlock> {
         let mut stmts = Vec::new();
         for s in block.stmts {
             stmts.push(self.lower_stmt(s)?);
         }
-        Ok(HirBlock { stmts, span: block.span })
+        Ok(HirBlock {
+            stmts,
+            span: block.span,
+        })
     }
-    
+
     fn lower_stmt(&mut self, stmt: ast::Stmt) -> RR<HirStmt> {
         match stmt.kind {
             ast::StmtKind::Let { name, init } => {
@@ -511,29 +553,56 @@ impl Lowerer {
                 } else {
                     None
                 };
-                Ok(HirStmt::Let { local: lid, name: sym, ty: None, init: val, span: stmt.span })
+                Ok(HirStmt::Let {
+                    local: lid,
+                    name: sym,
+                    ty: None,
+                    init: val,
+                    span: stmt.span,
+                })
             }
             ast::StmtKind::Assign { target, value } => {
                 let lhs = self.lower_lvalue(target)?;
                 let rhs = self.lower_expr(value)?;
-                Ok(HirStmt::Assign { target: lhs, value: rhs, span: stmt.span })
+                Ok(HirStmt::Assign {
+                    target: lhs,
+                    value: rhs,
+                    span: stmt.span,
+                })
             }
-            ast::StmtKind::If { cond, then_blk, else_blk } => {
+            ast::StmtKind::If {
+                cond,
+                then_blk,
+                else_blk,
+            } => {
                 let c = self.lower_expr(cond)?;
                 let t = self.lower_block(then_blk)?;
-                let e = if let Some(blk) = else_blk { Some(self.lower_block(blk)?) } else { None };
-                Ok(HirStmt::If { cond: c, then_blk: t, else_blk: e, span: stmt.span })
+                let e = if let Some(blk) = else_blk {
+                    Some(self.lower_block(blk)?)
+                } else {
+                    None
+                };
+                Ok(HirStmt::If {
+                    cond: c,
+                    then_blk: t,
+                    else_blk: e,
+                    span: stmt.span,
+                })
             }
             ast::StmtKind::While { cond, body } => {
                 let c = self.lower_expr(cond)?;
                 let b = self.lower_block(body)?;
-                Ok(HirStmt::While { cond: c, body: b, span: stmt.span })
+                Ok(HirStmt::While {
+                    cond: c,
+                    body: b,
+                    span: stmt.span,
+                })
             }
             ast::StmtKind::For { var, iter, body } => {
                 let iter_expr = self.lower_expr(iter)?;
                 self.enter_scope();
                 let lid = self.declare_local(&var);
-                
+
                 // Canonicalize known iterator forms for better downstream optimization.
                 let iter_kind = match iter_expr {
                     HirExpr::Range { start, end } => HirForIter::Range {
@@ -552,40 +621,68 @@ impl Lowerer {
                                     HirArg::Named { value, .. } => value,
                                 };
                                 if name == "seq_len" {
-                                    HirForIter::SeqLen { var: lid, len: arg_expr }
+                                    HirForIter::SeqLen {
+                                        var: lid,
+                                        len: arg_expr,
+                                    }
                                 } else if name == "seq_along" {
-                                    HirForIter::SeqAlong { var: lid, xs: arg_expr }
+                                    HirForIter::SeqAlong {
+                                        var: lid,
+                                        xs: arg_expr,
+                                    }
                                 } else {
-                                    HirForIter::SeqAlong { var: lid, xs: HirExpr::Call(call) }
+                                    HirForIter::SeqAlong {
+                                        var: lid,
+                                        xs: HirExpr::Call(call),
+                                    }
                                 }
                             }
-                            _ => HirForIter::SeqAlong { var: lid, xs: HirExpr::Call(call) },
+                            _ => HirForIter::SeqAlong {
+                                var: lid,
+                                xs: HirExpr::Call(call),
+                            },
                         }
                     }
-                    other => HirForIter::SeqAlong { var: lid, xs: other },
+                    other => HirForIter::SeqAlong {
+                        var: lid,
+                        xs: other,
+                    },
                 };
-                
+
                 let body_hir = self.lower_block(body)?;
                 self.exit_scope();
-                Ok(HirStmt::For { iter: iter_kind, body: body_hir, span: stmt.span })
+                Ok(HirStmt::For {
+                    iter: iter_kind,
+                    body: body_hir,
+                    span: stmt.span,
+                })
             }
             ast::StmtKind::Return { value } => {
-                let v = if let Some(e) = value { Some(self.lower_expr(e)?) } else { None };
-                Ok(HirStmt::Return { value: v, span: stmt.span })
+                let v = if let Some(e) = value {
+                    Some(self.lower_expr(e)?)
+                } else {
+                    None
+                };
+                Ok(HirStmt::Return {
+                    value: v,
+                    span: stmt.span,
+                })
             }
-            ast::StmtKind::Break => {
-                Ok(HirStmt::Break { span: stmt.span })
-            }
-            ast::StmtKind::Next => {
-                Ok(HirStmt::Next { span: stmt.span })
-            }
-            ast::StmtKind::ExprStmt { expr } => {
-                Ok(HirStmt::Expr { expr: self.lower_expr(expr)?, span: stmt.span })
-            }
-            _ => Err(RRException::new("Feature.NotImpl", RRCode::E9999, Stage::Lower, "Stmt kind not supported".to_string()))
+            ast::StmtKind::Break => Ok(HirStmt::Break { span: stmt.span }),
+            ast::StmtKind::Next => Ok(HirStmt::Next { span: stmt.span }),
+            ast::StmtKind::ExprStmt { expr } => Ok(HirStmt::Expr {
+                expr: self.lower_expr(expr)?,
+                span: stmt.span,
+            }),
+            _ => Err(RRException::new(
+                "Feature.NotImpl",
+                RRCode::E9999,
+                Stage::Lower,
+                "Stmt kind not supported".to_string(),
+            )),
         }
     }
-    
+
     fn lower_expr(&mut self, expr: ast::Expr) -> RR<HirExpr> {
         match expr.kind {
             ast::ExprKind::Lit(l) => {
@@ -623,14 +720,21 @@ impl Lowerer {
                     ast::BinOp::And => HirBinOp::And,
                     ast::BinOp::Or => HirBinOp::Or,
                 };
-                Ok(HirExpr::Binary { op: hop, lhs: Box::new(self.lower_expr(*lhs)?), rhs: Box::new(self.lower_expr(*rhs)?) })
+                Ok(HirExpr::Binary {
+                    op: hop,
+                    lhs: Box::new(self.lower_expr(*lhs)?),
+                    rhs: Box::new(self.lower_expr(*rhs)?),
+                })
             }
             ast::ExprKind::Unary { op, rhs } => {
                 let hop = match op {
                     ast::UnaryOp::Not => HirUnOp::Not,
                     ast::UnaryOp::Neg => HirUnOp::Neg,
                 };
-                Ok(HirExpr::Unary { op: hop, expr: Box::new(self.lower_expr(*rhs)?) })
+                Ok(HirExpr::Unary {
+                    op: hop,
+                    expr: Box::new(self.lower_expr(*rhs)?),
+                })
             }
             ast::ExprKind::Lambda { params, body } => {
                 self.lower_lambda_expr(params, body, expr.span)
@@ -650,7 +754,11 @@ impl Lowerer {
                         _ => hargs.push(HirArg::Pos(self.lower_expr(a)?)),
                     }
                 }
-                Ok(HirExpr::Call(HirCall { callee: Box::new(c), args: hargs, span: expr.span }))
+                Ok(HirExpr::Call(HirCall {
+                    callee: Box::new(c),
+                    args: hargs,
+                    span: expr.span,
+                }))
             }
             ast::ExprKind::Pipe { lhs, rhs_call } => {
                 let lhs_h = self.lower_expr(*lhs)?;
@@ -671,37 +779,43 @@ impl Lowerer {
                                 _ => hargs.push(HirArg::Pos(self.lower_expr(a)?)),
                             }
                         }
-                        Ok(HirExpr::Call(HirCall { callee: Box::new(c), args: hargs, span: expr.span }))
+                        Ok(HirExpr::Call(HirCall {
+                            callee: Box::new(c),
+                            args: hargs,
+                            span: expr.span,
+                        }))
                     }
-                    ast::ExprKind::Try { expr: inner } => {
-                        match inner.kind {
-                            ast::ExprKind::Call { callee, args } => {
-                                let c = self.lower_expr(*callee)?;
-                                let mut hargs = Vec::with_capacity(args.len() + 1);
-                                hargs.push(HirArg::Pos(lhs_h));
-                                for a in args {
-                                    match a.kind {
-                                        ast::ExprKind::NamedArg { name, value } => {
-                                            let sym = self.intern_symbol(&name);
-                                            hargs.push(HirArg::Named {
-                                                name: sym,
-                                                value: self.lower_expr(*value)?,
-                                            });
-                                        }
-                                        _ => hargs.push(HirArg::Pos(self.lower_expr(a)?)),
+                    ast::ExprKind::Try { expr: inner } => match inner.kind {
+                        ast::ExprKind::Call { callee, args } => {
+                            let c = self.lower_expr(*callee)?;
+                            let mut hargs = Vec::with_capacity(args.len() + 1);
+                            hargs.push(HirArg::Pos(lhs_h));
+                            for a in args {
+                                match a.kind {
+                                    ast::ExprKind::NamedArg { name, value } => {
+                                        let sym = self.intern_symbol(&name);
+                                        hargs.push(HirArg::Named {
+                                            name: sym,
+                                            value: self.lower_expr(*value)?,
+                                        });
                                     }
+                                    _ => hargs.push(HirArg::Pos(self.lower_expr(a)?)),
                                 }
-                                let call = HirExpr::Call(HirCall { callee: Box::new(c), args: hargs, span: expr.span });
-                                Ok(HirExpr::Try(Box::new(call)))
                             }
-                            _ => Err(RRException::new(
-                                "RR.ParseError",
-                                RRCode::E0001,
-                                Stage::Lower,
-                                "RHS of |> must be call or call?".to_string(),
-                            )),
+                            let call = HirExpr::Call(HirCall {
+                                callee: Box::new(c),
+                                args: hargs,
+                                span: expr.span,
+                            });
+                            Ok(HirExpr::Try(Box::new(call)))
                         }
-                    }
+                        _ => Err(RRException::new(
+                            "RR.ParseError",
+                            RRCode::E0001,
+                            Stage::Lower,
+                            "RHS of |> must be call or call?".to_string(),
+                        )),
+                    },
                     _ => Err(RRException::new(
                         "RR.ParseError",
                         RRCode::E0001,
@@ -713,37 +827,41 @@ impl Lowerer {
             ast::ExprKind::Field { base, name } => {
                 let b = self.lower_expr(*base)?;
                 let sym = self.intern_symbol(&name);
-                Ok(HirExpr::Field { base: Box::new(b), name: sym })
+                Ok(HirExpr::Field {
+                    base: Box::new(b),
+                    name: sym,
+                })
             }
             // v6 features
             ast::ExprKind::Match { scrutinee, arms } => {
-                 let s = self.lower_expr(*scrutinee)?;
-                 let mut harms = Vec::new();
-                 for arm in arms {
-                     self.enter_scope(); // Arm scope
-                     let pat = self.lower_pattern(arm.pat)?;
-                     let guard = if let Some(g) = arm.guard { Some(self.lower_expr(*g)?) } else { None };
-                     let body = self.lower_expr(*arm.body)?;
-                     self.exit_scope();
-                     
-                     harms.push(HirMatchArm { 
-                        pat, 
-                        guard, 
-                        body, 
-                        span: arm.span 
-                     });
-                 }
-                 Ok(HirExpr::Match { scrut: Box::new(s), arms: harms })
+                let s = self.lower_expr(*scrutinee)?;
+                let mut harms = Vec::new();
+                for arm in arms {
+                    self.enter_scope(); // Arm scope
+                    let pat = self.lower_pattern(arm.pat)?;
+                    let guard = if let Some(g) = arm.guard {
+                        Some(self.lower_expr(*g)?)
+                    } else {
+                        None
+                    };
+                    let body = self.lower_expr(*arm.body)?;
+                    self.exit_scope();
+
+                    harms.push(HirMatchArm {
+                        pat,
+                        guard,
+                        body,
+                        span: arm.span,
+                    });
+                }
+                Ok(HirExpr::Match {
+                    scrut: Box::new(s),
+                    arms: harms,
+                })
             }
-            ast::ExprKind::Try { expr: e } => {
-                Ok(HirExpr::Try(Box::new(self.lower_expr(*e)?)))
-            }
-            ast::ExprKind::Column(n) => {
-                Ok(HirExpr::Column(n))
-            }
-            ast::ExprKind::ColRef(n) => {
-                Ok(HirExpr::Column(n))
-            }
+            ast::ExprKind::Try { expr: e } => Ok(HirExpr::Try(Box::new(self.lower_expr(*e)?))),
+            ast::ExprKind::Column(n) => Ok(HirExpr::Column(n)),
+            ast::ExprKind::ColRef(n) => Ok(HirExpr::Column(n)),
             ast::ExprKind::Unquote(e) => {
                 let inner = self.lower_expr(*e)?;
                 Ok(HirExpr::Unquote(Box::new(inner)))
@@ -754,41 +872,45 @@ impl Lowerer {
                 for i in idx {
                     indices.push(self.lower_expr(i)?);
                 }
-                Ok(HirExpr::Index { base: Box::new(b), index: indices })
+                Ok(HirExpr::Index {
+                    base: Box::new(b),
+                    index: indices,
+                })
             }
             ast::ExprKind::Range { a, b } => {
                 let start = self.lower_expr(*a)?;
                 let end = self.lower_expr(*b)?;
-                Ok(HirExpr::Range { start: Box::new(start), end: Box::new(end) }) 
+                Ok(HirExpr::Range {
+                    start: Box::new(start),
+                    end: Box::new(end),
+                })
             }
             ast::ExprKind::VectorLit(elems) => {
-                 let mut helems = Vec::new();
-                 for e in elems {
-                     helems.push(self.lower_expr(e)?);
-                 }
-                 Ok(HirExpr::VectorLit(helems))
+                let mut helems = Vec::new();
+                for e in elems {
+                    helems.push(self.lower_expr(e)?);
+                }
+                Ok(HirExpr::VectorLit(helems))
             }
             ast::ExprKind::RecordLit(fields) => {
-                 let mut hfields = Vec::new();
-                 for (k, v) in fields {
-                     let sym = self.intern_symbol(&k);
-                     hfields.push((sym, self.lower_expr(v)?));
-                 }
-                 Ok(HirExpr::ListLit(hfields))
+                let mut hfields = Vec::new();
+                for (k, v) in fields {
+                    let sym = self.intern_symbol(&k);
+                    hfields.push((sym, self.lower_expr(v)?));
+                }
+                Ok(HirExpr::ListLit(hfields))
             }
-            _ => Err(
-                RRException::new(
-                    "RR.SemanticError",
-                    RRCode::E1002,
-                    Stage::Lower,
-                    format!("unsupported expression in HIR lowering: {:?}", expr.kind),
-                )
-                .at(expr.span)
-                .push_frame("hir::lower::lower_expr/1", Some(expr.span)),
+            _ => Err(RRException::new(
+                "RR.SemanticError",
+                RRCode::E1002,
+                Stage::Lower,
+                format!("unsupported expression in HIR lowering: {:?}", expr.kind),
             )
+            .at(expr.span)
+            .push_frame("hir::lower::lower_expr/1", Some(expr.span))),
         }
     }
-    
+
     fn lower_pattern(&mut self, pat: ast::Pattern) -> RR<HirPat> {
         match pat.kind {
             ast::PatternKind::Wild => Ok(HirPat::Wild),
@@ -806,12 +928,17 @@ impl Lowerer {
             ast::PatternKind::Bind(n) => {
                 let lid = self.declare_local(&n);
                 let sym = self.intern_symbol(&n);
-                Ok(HirPat::Bind { name: sym, local: lid })
+                Ok(HirPat::Bind {
+                    name: sym,
+                    local: lid,
+                })
             }
             ast::PatternKind::List { items, rest } => {
                 let mut hitems = Vec::new();
-                for i in items { hitems.push(self.lower_pattern(i)?); }
-                
+                for i in items {
+                    hitems.push(self.lower_pattern(i)?);
+                }
+
                 let hrest = if let Some(n) = rest {
                     let lid = self.declare_local(&n);
                     let sym = self.intern_symbol(&n);
@@ -819,7 +946,10 @@ impl Lowerer {
                 } else {
                     None
                 };
-                Ok(HirPat::List { items: hitems, rest: hrest })
+                Ok(HirPat::List {
+                    items: hitems,
+                    rest: hrest,
+                })
             }
             ast::PatternKind::Record { fields } => {
                 let mut hfields = Vec::new();
@@ -832,7 +962,7 @@ impl Lowerer {
             }
         }
     }
-    
+
     fn lower_lvalue(&mut self, lval: ast::LValue) -> RR<HirLValue> {
         let lv_span = lval.span;
         match lval.kind {
@@ -841,16 +971,14 @@ impl Lowerer {
                     lid
                 } else {
                     if self.strict_let {
-                        return Err(
-                            RRException::new(
-                                "RR.SemanticError",
-                                RRCode::E1001,
-                                Stage::Lower,
-                                format!("assignment to undeclared variable '{}'", n),
-                            )
-                            .at(lv_span)
-                            .note("Declare it first with `let` before using `<-`."),
-                        );
+                        return Err(RRException::new(
+                            "RR.SemanticError",
+                            RRCode::E1001,
+                            Stage::Lower,
+                            format!("assignment to undeclared variable '{}'", n),
+                        )
+                        .at(lv_span)
+                        .note("Declare it first with `let` before using `<-`."));
                     }
                     let lid = self.declare_local(&n);
                     let where_msg = if lv_span.start_line > 0 {
@@ -872,7 +1000,10 @@ impl Lowerer {
                 for i in idx {
                     indices.push(self.lower_expr(i)?);
                 }
-                Ok(HirLValue::Index { base: b, index: indices })
+                Ok(HirLValue::Index {
+                    base: b,
+                    index: indices,
+                })
             }
             ast::LValueKind::Field { base, name } => {
                 let b = self.lower_expr(base)?;

@@ -1,25 +1,24 @@
-﻿
 use crate::mir::*;
 use crate::syntax::ast::BinOp;
-use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::hash::{Hash, Hasher};
 
+pub mod bce;
+pub mod de_ssa;
+pub mod fresh_alloc;
+pub mod gvn;
+pub mod inline;
+pub mod intrinsics;
+pub mod licm;
 pub mod loop_analysis;
 pub mod loop_opt;
-pub mod licm;
-pub mod fresh_alloc;
+pub mod parallel_copy;
 pub mod sccp;
 pub mod simplify;
-pub mod inline;
-pub mod gvn;
 pub mod tco;
-pub mod bce;
 pub mod v_opt;
-pub mod parallel_copy;
-pub mod de_ssa;
-pub mod intrinsics;
 
 pub struct TachyonEngine;
 
@@ -66,7 +65,9 @@ impl TachyonPulseStats {
 pub type MirOptimizer = TachyonEngine;
 
 impl TachyonEngine {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     fn verify_or_panic(fn_ir: &FnIR, stage: &str) {
         if let Err(e) = crate::mir::verify::verify_ir(fn_ir) {
@@ -77,9 +78,26 @@ impl TachyonEngine {
         }
     }
 
+    fn verify_or_reject(fn_ir: &mut FnIR, stage: &str) -> bool {
+        match crate::mir::verify::verify_ir(fn_ir) {
+            Ok(()) => true,
+            Err(e) => {
+                fn_ir.unsupported_dynamic = true;
+                let reason = format!("invalid MIR at {}: {}", stage, e);
+                if !fn_ir.fallback_reasons.iter().any(|r| r == &reason) {
+                    fn_ir.fallback_reasons.push(reason);
+                }
+                false
+            }
+        }
+    }
+
     fn env_bool(key: &str, default_v: bool) -> bool {
         match env::var(key) {
-            Ok(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+            Ok(v) => matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            ),
             Err(_) => default_v,
         }
     }
@@ -121,7 +139,15 @@ impl TachyonEngine {
                     2u8.hash(h);
                     val.hash(h);
                 }
-                Instr::StoreIndex1D { base, idx, val, is_safe, is_na_safe, is_vector, .. } => {
+                Instr::StoreIndex1D {
+                    base,
+                    idx,
+                    val,
+                    is_safe,
+                    is_na_safe,
+                    is_vector,
+                    ..
+                } => {
                     3u8.hash(h);
                     base.hash(h);
                     idx.hash(h);
@@ -130,7 +156,9 @@ impl TachyonEngine {
                     is_na_safe.hash(h);
                     is_vector.hash(h);
                 }
-                Instr::StoreIndex2D { base, r, c, val, .. } => {
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => {
                     4u8.hash(h);
                     base.hash(h);
                     r.hash(h);
@@ -166,7 +194,9 @@ impl TachyonEngine {
     // This must run even in O0, because codegen cannot emit Phi.
     pub fn stabilize_for_codegen(&self, all_fns: &mut std::collections::HashMap<String, FnIR>) {
         for (_, fn_ir) in all_fns.iter_mut() {
-            Self::verify_or_panic(fn_ir, "PrepareForCodegen/Start");
+            if !Self::verify_or_reject(fn_ir, "PrepareForCodegen/Start") {
+                continue;
+            }
             let _ = de_ssa::run(fn_ir);
             // Keep this lightweight but convergent to avoid dead temp noise after De-SSA.
             // Hybrid fallback functions skip cleanup to preserve dynamic semantics.
@@ -180,7 +210,7 @@ impl TachyonEngine {
                     changed |= self.dce(fn_ir);
                 }
             }
-            Self::verify_or_panic(fn_ir, "PrepareForCodegen/End");
+            let _ = Self::verify_or_reject(fn_ir, "PrepareForCodegen/End");
         }
     }
 
@@ -188,33 +218,36 @@ impl TachyonEngine {
         let _ = self.run_program_with_stats(all_fns);
     }
 
-    pub fn run_program_with_stats(&self, all_fns: &mut std::collections::HashMap<String, FnIR>) -> TachyonPulseStats {
+    pub fn run_program_with_stats(
+        &self,
+        all_fns: &mut std::collections::HashMap<String, FnIR>,
+    ) -> TachyonPulseStats {
         /*
         // 1. Clean
         simplify::SimplifyCFG::new().optimize(fn_ir);
-        
+
         loop {
              let mut changed = false;
-             
+
              // 2. Sccp
              // changed |= sccp::MirSccp::new().optimize(fn_ir);
-             
+
              // 3. LICM
              // changed |= licm::MirLicm::new().optimize(fn_ir);
-             
+
              // 4. Clean again
              changed |= simplify::SimplifyCFG::new().optimize(fn_ir);
-             
+
              if !changed { break; }
         }
-        
+
         // TCO
         tco::optimize(fn_ir);
-        
+
         // Final polish (DCE/cleanup)
         simplify::SimplifyCFG::new().optimize(fn_ir);
         */
-        
+
         let mut stats = TachyonPulseStats::default();
 
         let callmap_user_whitelist = Self::collect_callmap_user_whitelist(all_fns);
@@ -222,7 +255,7 @@ impl TachyonEngine {
         // 1. Initial independent optimization for all functions
         for (_, fn_ir) in all_fns.iter_mut() {
             if fn_ir.unsupported_dynamic {
-                Self::verify_or_panic(fn_ir, "SkipOpt/UnsupportedDynamic");
+                let _ = Self::verify_or_reject(fn_ir, "SkipOpt/UnsupportedDynamic");
                 continue;
             }
             let s = self.run_function_with_stats(fn_ir, &callmap_user_whitelist);
@@ -246,7 +279,10 @@ impl TachyonEngine {
                 // Re-optimize each function if inlining happened
                 for (_, fn_ir) in all_fns.iter_mut() {
                     if fn_ir.unsupported_dynamic {
-                        Self::maybe_verify(fn_ir, "After Inline Cleanup (Skipped: UnsupportedDynamic)");
+                        Self::maybe_verify(
+                            fn_ir,
+                            "After Inline Cleanup (Skipped: UnsupportedDynamic)",
+                        );
                         continue;
                     }
                     // Run lightweight cleanup after inlining.
@@ -283,7 +319,7 @@ impl TachyonEngine {
                     stats.dce_hits += 1;
                 }
             }
-            Self::verify_or_panic(fn_ir, "After De-SSA");
+            let _ = Self::verify_or_reject(fn_ir, "After De-SSA");
         }
         stats
     }
@@ -303,16 +339,18 @@ impl TachyonEngine {
         let loop_opt = loop_opt::MirLoopOptimizer::new();
         let mut iterations = 0;
         let mut seen_hashes = HashSet::new();
-        
+
         // Initial Verify
-        Self::verify_or_panic(fn_ir, "Start");
+        if !Self::verify_or_reject(fn_ir, "Start") {
+            return stats;
+        }
         seen_hashes.insert(Self::fn_ir_fingerprint(fn_ir));
 
         while changed && iterations < Self::max_opt_iterations() {
             changed = false;
             iterations += 1;
             let before_hash = Self::fn_ir_fingerprint(fn_ir);
-            
+
             // 1. Structural Transformations
             let mut pass_changed = false;
             // Vectorization
@@ -330,7 +368,7 @@ impl TachyonEngine {
             }
             Self::maybe_verify(fn_ir, "After TCO");
             pass_changed |= tco_changed;
-            
+
             if pass_changed {
                 changed = true;
                 // Intensive cleanup after structural changes
@@ -442,7 +480,7 @@ impl TachyonEngine {
             }
             polishing |= dce_changed;
         }
-        Self::verify_or_panic(fn_ir, "End");
+        let _ = Self::verify_or_reject(fn_ir, "End");
         stats
     }
 
@@ -510,7 +548,12 @@ impl TachyonEngine {
             if let Terminator::Return(ret) = bb.term {
                 let Some(ret_vid) = ret else { return false };
                 saw_return = true;
-                if !Self::is_vector_safe_user_expr(fn_ir, ret_vid, user_whitelist, &mut HashSet::new()) {
+                if !Self::is_vector_safe_user_expr(
+                    fn_ir,
+                    ret_vid,
+                    user_whitelist,
+                    &mut HashSet::new(),
+                ) {
                     return false;
                 }
             }
@@ -530,13 +573,16 @@ impl TachyonEngine {
         }
         match &fn_ir.values[vid].kind {
             ValueKind::Const(_) | ValueKind::Param { .. } | ValueKind::Load { .. } => true,
-            ValueKind::Unary { rhs, .. } => Self::is_vector_safe_user_expr(fn_ir, *rhs, user_whitelist, seen),
+            ValueKind::Unary { rhs, .. } => {
+                Self::is_vector_safe_user_expr(fn_ir, *rhs, user_whitelist, seen)
+            }
             ValueKind::Binary { lhs, rhs, .. } => {
                 Self::is_vector_safe_user_expr(fn_ir, *lhs, user_whitelist, seen)
                     && Self::is_vector_safe_user_expr(fn_ir, *rhs, user_whitelist, seen)
             }
             ValueKind::Call { callee, args, .. } => {
-                (v_opt::is_builtin_vector_safe_call(callee, args.len()) || user_whitelist.contains(callee))
+                (v_opt::is_builtin_vector_safe_call(callee, args.len())
+                    || user_whitelist.contains(callee))
                     && args
                         .iter()
                         .all(|a| Self::is_vector_safe_user_expr(fn_ir, *a, user_whitelist, seen))
@@ -560,7 +606,9 @@ impl TachyonEngine {
             let mut src: Option<ValueId> = None;
             for bb in &fn_ir.blocks {
                 for ins in &bb.instrs {
-                    let Instr::Assign { dst, src: s, .. } = ins else { continue };
+                    let Instr::Assign { dst, src: s, .. } = ins else {
+                        continue;
+                    };
                     if dst != var {
                         continue;
                     }
@@ -593,31 +641,39 @@ impl TachyonEngine {
 
     fn simplify_cfg(&self, fn_ir: &mut FnIR) -> bool {
         let mut changed = false;
-        
+
         // 1. Identify reachable blocks
         let mut reachable = HashSet::new();
         let mut queue = vec![fn_ir.entry];
         reachable.insert(fn_ir.entry);
-        
+
         let mut head = 0;
         while head < queue.len() {
             let bid = queue[head];
             head += 1;
-            
+
             if let Some(blk) = fn_ir.blocks.get(bid) {
                 match &blk.term {
                     Terminator::Goto(target) => {
-                         if reachable.insert(*target) { queue.push(*target); }
-                    },
-                    Terminator::If { then_bb, else_bb, .. } => {
-                         if reachable.insert(*then_bb) { queue.push(*then_bb); }
-                         if reachable.insert(*else_bb) { queue.push(*else_bb); }
-                    },
-                    _ => {},
+                        if reachable.insert(*target) {
+                            queue.push(*target);
+                        }
+                    }
+                    Terminator::If {
+                        then_bb, else_bb, ..
+                    } => {
+                        if reachable.insert(*then_bb) {
+                            queue.push(*then_bb);
+                        }
+                        if reachable.insert(*else_bb) {
+                            queue.push(*else_bb);
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
-        
+
         // 2. Clear out unreachable blocks
         for bid in 0..fn_ir.blocks.len() {
             if !reachable.contains(&bid) {
@@ -629,21 +685,27 @@ impl TachyonEngine {
                 }
             }
         }
-        
+
         changed
     }
 
     fn dce(&self, fn_ir: &mut FnIR) -> bool {
         let mut changed = false;
-        
+
         // 1. Mark used values
         let mut used = HashSet::new();
-        
+
         // Final values used in terminators
         for blk in &fn_ir.blocks {
             match &blk.term {
-                Terminator::If { cond, .. } => { used.insert(*cond); },
-                Terminator::Return(val) => { if let Some(id) = val { used.insert(*id); } },
+                Terminator::If { cond, .. } => {
+                    used.insert(*cond);
+                }
+                Terminator::Return(val) => {
+                    if let Some(id) = val {
+                        used.insert(*id);
+                    }
+                }
                 _ => {}
             }
         }
@@ -653,14 +715,20 @@ impl TachyonEngine {
             for instr in &blk.instrs {
                 if self.has_side_effect_instr(instr, &fn_ir.values) {
                     match instr {
-                        Instr::Assign { src, .. } => { used.insert(*src); },
-                        Instr::Eval { val, .. } => { used.insert(*val); },
+                        Instr::Assign { src, .. } => {
+                            used.insert(*src);
+                        }
+                        Instr::Eval { val, .. } => {
+                            used.insert(*val);
+                        }
                         Instr::StoreIndex1D { base, idx, val, .. } => {
                             used.insert(*base);
                             used.insert(*idx);
                             used.insert(*val);
                         }
-                        Instr::StoreIndex2D { base, r, c, val, .. } => {
+                        Instr::StoreIndex2D {
+                            base, r, c, val, ..
+                        } => {
                             used.insert(*base);
                             used.insert(*r);
                             used.insert(*c);
@@ -670,55 +738,89 @@ impl TachyonEngine {
                 }
             }
         }
-        
+
         // 2. Propagate usage (transitive closure)
         let mut worklist: Vec<ValueId> = used.iter().cloned().collect();
         while let Some(vid) = worklist.pop() {
             let val = &fn_ir.values[vid];
             match &val.kind {
                 ValueKind::Binary { lhs, rhs, .. } => {
-                    if used.insert(*lhs) { worklist.push(*lhs); }
-                    if used.insert(*rhs) { worklist.push(*rhs); }
-                },
+                    if used.insert(*lhs) {
+                        worklist.push(*lhs);
+                    }
+                    if used.insert(*rhs) {
+                        worklist.push(*rhs);
+                    }
+                }
                 ValueKind::Unary { rhs, .. } => {
-                    if used.insert(*rhs) { worklist.push(*rhs); }
-                },
+                    if used.insert(*rhs) {
+                        worklist.push(*rhs);
+                    }
+                }
                 ValueKind::Call { args, .. } => {
-                    for a in args { if used.insert(*a) { worklist.push(*a); } }
-                },
+                    for a in args {
+                        if used.insert(*a) {
+                            worklist.push(*a);
+                        }
+                    }
+                }
                 ValueKind::Phi { args } => {
-                    for (a, _) in args { if used.insert(*a) { worklist.push(*a); } }
-                },
+                    for (a, _) in args {
+                        if used.insert(*a) {
+                            worklist.push(*a);
+                        }
+                    }
+                }
                 ValueKind::Index1D { base, idx, .. } => {
-                    if used.insert(*base) { worklist.push(*base); }
-                    if used.insert(*idx) { worklist.push(*idx); }
-                },
+                    if used.insert(*base) {
+                        worklist.push(*base);
+                    }
+                    if used.insert(*idx) {
+                        worklist.push(*idx);
+                    }
+                }
                 ValueKind::Index2D { base, r, c } => {
-                    if used.insert(*base) { worklist.push(*base); }
-                    if used.insert(*r) { worklist.push(*r); }
-                    if used.insert(*c) { worklist.push(*c); }
-                },
+                    if used.insert(*base) {
+                        worklist.push(*base);
+                    }
+                    if used.insert(*r) {
+                        worklist.push(*r);
+                    }
+                    if used.insert(*c) {
+                        worklist.push(*c);
+                    }
+                }
                 ValueKind::Len { base } => {
-                    if used.insert(*base) { worklist.push(*base); }
-                },
+                    if used.insert(*base) {
+                        worklist.push(*base);
+                    }
+                }
                 ValueKind::Indices { base } => {
-                    if used.insert(*base) { worklist.push(*base); }
-                },
+                    if used.insert(*base) {
+                        worklist.push(*base);
+                    }
+                }
                 ValueKind::Range { start, end } => {
-                    if used.insert(*start) { worklist.push(*start); }
-                    if used.insert(*end) { worklist.push(*end); }
-                },
+                    if used.insert(*start) {
+                        worklist.push(*start);
+                    }
+                    if used.insert(*end) {
+                        worklist.push(*end);
+                    }
+                }
                 _ => {}
             }
         }
-        
+
         // 3. Remove dead instructions
         for blk in &mut fn_ir.blocks {
             let old_len = blk.instrs.len();
             let values = &fn_ir.values; // Grab values before retain closure
             blk.instrs.retain(|instr| {
-                if self.has_side_effect_instr(instr, values) { return true; }
-                
+                if self.has_side_effect_instr(instr, values) {
+                    return true;
+                }
+
                 match instr {
                     Instr::Assign { src, .. } => used.contains(src),
                     Instr::Eval { val, .. } => used.contains(val),
@@ -729,7 +831,7 @@ impl TachyonEngine {
                 changed = true;
             }
         }
-        
+
         changed
     }
 
@@ -739,8 +841,8 @@ impl TachyonEngine {
             Instr::StoreIndex2D { .. } => true,
             Instr::Assign { .. } => {
                 // Assignments are kept conservative unless proven dead.
-                true 
-            },
+                true
+            }
             Instr::Eval { val, .. } => self.has_side_effect_val(*val, values),
         }
     }
@@ -774,22 +876,25 @@ impl TachyonEngine {
             _ => false,
         }
     }
-    
+
     fn check_elimination(&self, fn_ir: &mut FnIR) -> bool {
         let mut changed = false;
-        
+
         // 1. Run Dataflow Analysis to get Interval Facts
         let facts = crate::mir::flow::DataflowSolver::analyze_function(fn_ir);
-        
+
         // 2. Scan for Indexing operations
         // We need to iterate over values and instructions.
-        
+
         // OPTIMIZATION: Index1D (Value)
         for val_idx in 0..fn_ir.values.len() {
             let mut is_proven_safe = false;
             {
                 let val = &fn_ir.values[val_idx];
-                if let ValueKind::Index1D { base, idx, is_safe, .. } = &val.kind {
+                if let ValueKind::Index1D {
+                    base, idx, is_safe, ..
+                } = &val.kind
+                {
                     if !*is_safe {
                         if self.is_safe_access(fn_ir, *base, *idx, &facts) {
                             is_proven_safe = true;
@@ -798,20 +903,26 @@ impl TachyonEngine {
                 }
             }
             if is_proven_safe {
-                if let ValueKind::Index1D { ref mut is_safe, .. } = fn_ir.values[val_idx].kind {
+                if let ValueKind::Index1D {
+                    ref mut is_safe, ..
+                } = fn_ir.values[val_idx].kind
+                {
                     *is_safe = true;
                     changed = true;
                 }
             }
         }
-        
+
         // OPTIMIZATION: StoreIndex1D (Instruction)
         for blk_idx in 0..fn_ir.blocks.len() {
             for instr_idx in 0..fn_ir.blocks[blk_idx].instrs.len() {
                 let mut is_proven_safe = false;
                 {
                     let instr = &fn_ir.blocks[blk_idx].instrs[instr_idx];
-                    if let Instr::StoreIndex1D { base, idx, is_safe, .. } = instr {
+                    if let Instr::StoreIndex1D {
+                        base, idx, is_safe, ..
+                    } = instr
+                    {
                         if !*is_safe {
                             if self.is_safe_access(fn_ir, *base, *idx, &facts) {
                                 is_proven_safe = true;
@@ -820,51 +931,74 @@ impl TachyonEngine {
                     }
                 }
                 if is_proven_safe {
-                    if let Instr::StoreIndex1D { ref mut is_safe, .. } = fn_ir.blocks[blk_idx].instrs[instr_idx] {
+                    if let Instr::StoreIndex1D {
+                        ref mut is_safe, ..
+                    } = fn_ir.blocks[blk_idx].instrs[instr_idx]
+                    {
                         *is_safe = true;
                         changed = true;
                     }
                 }
             }
         }
-        
+
         changed
     }
 
-    fn is_safe_access(&self, fn_ir: &FnIR, base_id: ValueId, idx_id: ValueId, facts: &std::collections::HashMap<ValueId, crate::mir::flow::Facts>) -> bool {
-        let f = facts.get(&idx_id).cloned().unwrap_or(crate::mir::flow::Facts::empty());
-        
+    fn is_safe_access(
+        &self,
+        fn_ir: &FnIR,
+        base_id: ValueId,
+        idx_id: ValueId,
+        facts: &std::collections::HashMap<ValueId, crate::mir::flow::Facts>,
+    ) -> bool {
+        let f = facts
+            .get(&idx_id)
+            .cloned()
+            .unwrap_or(crate::mir::flow::Facts::empty());
+
         // Basic check: If it's ONE_BASED and fits in length.
         // Proving "fits in length" is hard without symbolic intervals.
         // Heuristic: If idx_id is from `Phi` of a loop whose limit is `len(base)`.
-        
+
         // Case A: Index comes from `indices(base)`
         // `ValueKind::Indices { base: b }` where b == base_id?
         // Or if idx_id is a Phi whose inputs come from indices(base).
-        
+
         // Case B: induction-variable pattern.
         if f.has(crate::mir::flow::Facts::ONE_BASED) {
-             if self.is_derived_from_len(fn_ir, idx_id, base_id, facts) {
-                 return true;
-             }
+            if self.is_derived_from_len(fn_ir, idx_id, base_id, facts) {
+                return true;
+            }
         }
-        
+
         false
     }
 
-    fn is_derived_from_len(&self, fn_ir: &FnIR, val_id: ValueId, base_id: ValueId, facts: &std::collections::HashMap<ValueId, crate::mir::flow::Facts>) -> bool {
+    fn is_derived_from_len(
+        &self,
+        fn_ir: &FnIR,
+        val_id: ValueId,
+        base_id: ValueId,
+        facts: &std::collections::HashMap<ValueId, crate::mir::flow::Facts>,
+    ) -> bool {
         let val = &fn_ir.values[val_id];
         match &val.kind {
             ValueKind::Indices { base } => *base == base_id,
-            ValueKind::Binary { op: BinOp::Add, lhs, rhs } => {
-                if let ValueKind::Const(crate::syntax::ast::Lit::Int(1)) = &fn_ir.values[*rhs].kind {
+            ValueKind::Binary {
+                op: BinOp::Add,
+                lhs,
+                rhs,
+            } => {
+                if let ValueKind::Const(crate::syntax::ast::Lit::Int(1)) = &fn_ir.values[*rhs].kind
+                {
                     return self.is_loop_induction(fn_ir, *lhs, base_id);
                 }
                 false
-            },
-            ValueKind::Phi { args } => {
-                args.iter().any(|(id, _)| self.is_derived_from_len(fn_ir, *id, base_id, facts))
-            },
+            }
+            ValueKind::Phi { args } => args
+                .iter()
+                .any(|(id, _)| self.is_derived_from_len(fn_ir, *id, base_id, facts)),
             _ => false,
         }
     }
@@ -873,11 +1007,11 @@ impl TachyonEngine {
         let val = &fn_ir.values[val_id];
         if let ValueKind::Phi { args } = &val.kind {
             for (arg_id, _) in args {
-                 let arg_val = &fn_ir.values[*arg_id];
-                 if let ValueKind::Const(crate::syntax::ast::Lit::Int(0)) = &arg_val.kind {
-                      // Heuristic: a phi starting at zero is treated as induction.
-                      return true;
-                 }
+                let arg_val = &fn_ir.values[*arg_id];
+                if let ValueKind::Const(crate::syntax::ast::Lit::Int(0)) = &arg_val.kind {
+                    // Heuristic: a phi starting at zero is treated as induction.
+                    return true;
+                }
             }
         }
         false

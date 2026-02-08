@@ -1,6 +1,6 @@
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::fs;
 
 #[test]
 fn o0_codegen_handles_phi_by_running_mandatory_de_ssa() {
@@ -36,7 +36,11 @@ print(sum_loop(8));
         .status()
         .expect("failed to run RR compiler");
 
-    assert!(status.success(), "O0 compile failed for {}", rr_src.display());
+    assert!(
+        status.success(),
+        "O0 compile failed for {}",
+        rr_src.display()
+    );
     let code = std::fs::read_to_string(&out_path).expect("failed to read O0 output");
     assert!(
         code.contains("<- function("),

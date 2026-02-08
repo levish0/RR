@@ -1,4 +1,3 @@
-﻿
 use crate::mir::*;
 use crate::syntax::ast::BinOp;
 
@@ -8,7 +7,11 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
     for vid in 0..fn_ir.values.len() {
         let kind = fn_ir.values[vid].kind.clone();
         match kind {
-            ValueKind::Binary { op: BinOp::Div, lhs, rhs } => {
+            ValueKind::Binary {
+                op: BinOp::Div,
+                lhs,
+                rhs,
+            } => {
                 if let Some(base) = sum_len_pattern(fn_ir, lhs, rhs) {
                     fn_ir.values[vid].kind = ValueKind::Call {
                         callee: "mean".to_string(),
@@ -18,8 +21,17 @@ pub fn optimize(fn_ir: &mut FnIR) -> bool {
                     changed = true;
                 }
             }
-            ValueKind::Call { ref callee, ref args, .. } if callee == "sqrt" && args.len() == 1 => {
-                if let ValueKind::Call { callee: inner, args: inner_args, .. } = &fn_ir.values[args[0]].kind {
+            ValueKind::Call {
+                ref callee,
+                ref args,
+                ..
+            } if callee == "sqrt" && args.len() == 1 => {
+                if let ValueKind::Call {
+                    callee: inner,
+                    args: inner_args,
+                    ..
+                } = &fn_ir.values[args[0]].kind
+                {
                     if inner == "var" && inner_args.len() == 1 {
                         let base = inner_args[0];
                         fn_ir.values[vid].kind = ValueKind::Call {

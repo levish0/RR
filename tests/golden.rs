@@ -92,10 +92,17 @@ fn golden_r_semantics() {
     let levels = [("-O0", "o0"), ("-O1", "o1"), ("-O2", "o2")];
 
     for rr_path in rr_files {
-        let stem = rr_path.file_stem().and_then(|s| s.to_str()).unwrap_or("case");
+        let stem = rr_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("case");
 
         let ref_r = golden_dir.join(format!("{}.R", stem));
-        let ref_path = if ref_r.exists() { ref_r } else { rr_path.clone() };
+        let ref_path = if ref_r.exists() {
+            ref_r
+        } else {
+            rr_path.clone()
+        };
 
         let ref_run = run_rscript(&rscript, &ref_path);
 
@@ -106,7 +113,8 @@ fn golden_r_semantics() {
             let compiled_run = run_rscript(&rscript, &compiled_path);
 
             assert_eq!(
-                ref_run.status, compiled_run.status,
+                ref_run.status,
+                compiled_run.status,
                 "exit status mismatch for {} ({})",
                 rr_path.display(),
                 flag
@@ -131,7 +139,8 @@ fn golden_r_semantics() {
         if let Some((base_flag, base_run)) = opt_runs.first() {
             for (flag, run) in opt_runs.iter().skip(1) {
                 assert_eq!(
-                    base_run.status, run.status,
+                    base_run.status,
+                    run.status,
                     "cross-opt status mismatch for {} ({} vs {})",
                     rr_path.display(),
                     base_flag,

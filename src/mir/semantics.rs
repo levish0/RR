@@ -174,10 +174,14 @@ fn validate_function_runtime(fn_ir: &FnIR) -> Vec<RRException> {
                                     "RR.RuntimeError",
                                     RRCode::E2007,
                                     Stage::Mir,
-                                    "seq_len() with negative length is guaranteed to fail".to_string(),
+                                    "seq_len() with negative length is guaranteed to fail"
+                                        .to_string(),
                                 )
                                 .at(v.span)
-                                .push_frame("mir::semantics::validate_function_runtime/1", Some(v.span))
+                                .push_frame(
+                                    "mir::semantics::validate_function_runtime/1",
+                                    Some(v.span),
+                                )
                                 .note("Ensure seq_len argument is >= 0."),
                             );
                         }
@@ -206,7 +210,11 @@ fn collect_reachable_blocks(fn_ir: &FnIR) -> HashSet<BlockId> {
         };
         match block.term {
             Terminator::Goto(next) => stack.push(next),
-            Terminator::If { cond, then_bb, else_bb } => {
+            Terminator::If {
+                cond,
+                then_bb,
+                else_bb,
+            } => {
                 let cond_lit = eval_const(fn_ir, cond, &mut memo, &mut HashSet::new());
                 match cond_lit {
                     Some(Lit::Bool(true)) => stack.push(then_bb),
@@ -243,7 +251,9 @@ fn collect_reachable_values(fn_ir: &FnIR, reachable_blocks: &HashSet<BlockId>) -
                     roots.push(*idx);
                     roots.push(*val);
                 }
-                Instr::StoreIndex2D { base, r, c, val, .. } => {
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => {
                     roots.push(*base);
                     roots.push(*r);
                     roots.push(*c);
@@ -402,7 +412,9 @@ fn eval_binary_const(op: BinOp, lhs: Lit, rhs: Lit) -> Option<Lit> {
             Some(Lit::Bool(r))
         }
         And | Or => match (lhs, rhs) {
-            (Lit::Bool(a), Lit::Bool(b)) => Some(Lit::Bool(if op == And { a && b } else { a || b })),
+            (Lit::Bool(a), Lit::Bool(b)) => {
+                Some(Lit::Bool(if op == And { a && b } else { a || b }))
+            }
             _ => None,
         },
         _ => None,
@@ -412,27 +424,23 @@ fn eval_binary_const(op: BinOp, lhs: Lit, rhs: Lit) -> Option<Lit> {
 fn validate_const_condition(lit: Lit, span: Span) -> RR<()> {
     match lit {
         Lit::Bool(_) => Ok(()),
-        Lit::Na => Err(
-            RRException::new(
-                "RR.RuntimeError",
-                RRCode::E2001,
-                Stage::Mir,
-                "condition is statically NA".to_string(),
-            )
-            .at(span)
-            .push_frame("mir::semantics::validate_const_condition/2", Some(span))
-            .note("R requires TRUE/FALSE in if/while conditions."),
-        ),
-        _ => Err(
-            RRException::new(
-                "RR.TypeError",
-                RRCode::E1002,
-                Stage::Mir,
-                "condition must be logical scalar".to_string(),
-            )
-            .at(span)
-            .push_frame("mir::semantics::validate_const_condition/2", Some(span)),
-        ),
+        Lit::Na => Err(RRException::new(
+            "RR.RuntimeError",
+            RRCode::E2001,
+            Stage::Mir,
+            "condition is statically NA".to_string(),
+        )
+        .at(span)
+        .push_frame("mir::semantics::validate_const_condition/2", Some(span))
+        .note("R requires TRUE/FALSE in if/while conditions.")),
+        _ => Err(RRException::new(
+            "RR.TypeError",
+            RRCode::E1002,
+            Stage::Mir,
+            "condition must be logical scalar".to_string(),
+        )
+        .at(span)
+        .push_frame("mir::semantics::validate_const_condition/2", Some(span))),
     }
 }
 
@@ -445,45 +453,45 @@ fn validate_index_lit_for_read(lit: Lit, span: Span) -> RR<()> {
 
 fn validate_index_lit_for_write(lit: Lit, span: Span) -> RR<()> {
     if matches!(lit, Lit::Na) {
-        return Err(
-            RRException::new(
-                "RR.RuntimeError",
-                RRCode::E2001,
-                Stage::Mir,
-                "index is statically NA in assignment".to_string(),
-            )
-            .at(span)
-            .push_frame("mir::semantics::validate_index_lit_for_write/2", Some(span)),
-        );
+        return Err(RRException::new(
+            "RR.RuntimeError",
+            RRCode::E2001,
+            Stage::Mir,
+            "index is statically NA in assignment".to_string(),
+        )
+        .at(span)
+        .push_frame("mir::semantics::validate_index_lit_for_write/2", Some(span)));
     }
     validate_index_integral_positive(lit, span)
 }
 
 fn validate_index_integral_positive(lit: Lit, span: Span) -> RR<()> {
     let Some(i) = as_integral(&lit) else {
-        return Err(
-            RRException::new(
-                "RR.TypeError",
-                RRCode::E1002,
-                Stage::Mir,
-                "index must be an integer scalar".to_string(),
-            )
-            .at(span)
-            .push_frame("mir::semantics::validate_index_integral_positive/2", Some(span)),
-        );
+        return Err(RRException::new(
+            "RR.TypeError",
+            RRCode::E1002,
+            Stage::Mir,
+            "index must be an integer scalar".to_string(),
+        )
+        .at(span)
+        .push_frame(
+            "mir::semantics::validate_index_integral_positive/2",
+            Some(span),
+        ));
     };
     if i < 1 {
-        return Err(
-            RRException::new(
-                "RR.RuntimeError",
-                RRCode::E2007,
-                Stage::Mir,
-                format!("index {} is out of bounds (must be >= 1)", i),
-            )
-            .at(span)
-            .push_frame("mir::semantics::validate_index_integral_positive/2", Some(span))
-            .note("R indexing is 1-based at runtime."),
-        );
+        return Err(RRException::new(
+            "RR.RuntimeError",
+            RRCode::E2007,
+            Stage::Mir,
+            format!("index {} is out of bounds (must be >= 1)", i),
+        )
+        .at(span)
+        .push_frame(
+            "mir::semantics::validate_index_integral_positive/2",
+            Some(span),
+        )
+        .note("R indexing is 1-based at runtime."));
     }
     Ok(())
 }
@@ -518,39 +526,37 @@ fn validate_call_target(
 ) -> RR<()> {
     if let Some(expected) = user_arities.get(callee) {
         if *expected != argc {
-            return Err(
-                RRException::new(
-                    "RR.SemanticError",
-                    RRCode::E1002,
-                    Stage::Mir,
-                    format!(
-                        "function '{}' expects {} argument(s), got {}",
-                        callee, expected, argc
-                    ),
-                )
-                .at(span)
-                .push_frame("mir::semantics::validate_call_target/4", Some(span)),
-            );
+            return Err(RRException::new(
+                "RR.SemanticError",
+                RRCode::E1002,
+                Stage::Mir,
+                format!(
+                    "function '{}' expects {} argument(s), got {}",
+                    callee, expected, argc
+                ),
+            )
+            .at(span)
+            .push_frame("mir::semantics::validate_call_target/4", Some(span)));
         }
         return Ok(());
     }
 
     if let Some((min, max)) = builtin_arity(callee) {
         if argc < min || max.is_some_and(|m| argc > m) {
-            let upper = max.map(|m| m.to_string()).unwrap_or_else(|| "inf".to_string());
-            return Err(
-                RRException::new(
-                    "RR.SemanticError",
-                    RRCode::E1002,
-                    Stage::Mir,
-                    format!(
-                        "builtin '{}' expects {}..{} argument(s), got {}",
-                        callee, min, upper, argc
-                    ),
-                )
-                .at(span)
-                .push_frame("mir::semantics::validate_call_target/4", Some(span)),
-            );
+            let upper = max
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "inf".to_string());
+            return Err(RRException::new(
+                "RR.SemanticError",
+                RRCode::E1002,
+                Stage::Mir,
+                format!(
+                    "builtin '{}' expects {}..{} argument(s), got {}",
+                    callee, min, upper, argc
+                ),
+            )
+            .at(span)
+            .push_frame("mir::semantics::validate_call_target/4", Some(span)));
         }
         return Ok(());
     }
@@ -559,25 +565,24 @@ fn validate_call_target(
         return Ok(());
     }
 
-    Err(
-        RRException::new(
-            "RR.SemanticError",
-            RRCode::E1001,
-            Stage::Mir,
-            format!("undefined function '{}'", callee),
-        )
-        .at(span)
-        .push_frame("mir::semantics::validate_call_target/4", Some(span))
-        .note("Define the function before calling it, or import the module that provides it."),
+    Err(RRException::new(
+        "RR.SemanticError",
+        RRCode::E1001,
+        Stage::Mir,
+        format!("undefined function '{}'", callee),
     )
+    .at(span)
+    .push_frame("mir::semantics::validate_call_target/4", Some(span))
+    .note("Define the function before calling it, or import the module that provides it."))
 }
 
 fn builtin_arity(name: &str) -> Option<(usize, Option<usize>)> {
     match name {
-        "length" | "seq_len" | "seq_along" | "abs" | "sqrt" | "sin" | "cos" | "tan"
-        | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "log10" | "log2"
-        | "exp" | "sign" | "gamma" | "lgamma" | "floor" | "ceiling" | "trunc"
-        | "colSums" | "rowSums" => Some((1, Some(1))),
+        "length" | "seq_len" | "seq_along" | "abs" | "sqrt" | "sin" | "cos" | "tan" | "asin"
+        | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "log10" | "log2" | "exp" | "sign"
+        | "gamma" | "lgamma" | "floor" | "ceiling" | "trunc" | "colSums" | "rowSums" => {
+            Some((1, Some(1)))
+        }
         "atan2" => Some((2, Some(2))),
         "round" | "log" => Some((1, Some(2))),
         "pmax" | "pmin" => Some((2, None)),

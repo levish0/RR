@@ -1,6 +1,6 @@
-﻿#![allow(dead_code)]
+#![allow(dead_code)]
 
-pub mod token;
-pub mod lex;
 pub mod ast;
+pub mod lex;
 pub mod parse;
+pub mod token;

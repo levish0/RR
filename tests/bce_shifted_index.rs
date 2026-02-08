@@ -31,7 +31,11 @@ fn shifted(x) {
         .arg("-O1")
         .status()
         .expect("failed to run RR compiler");
-    assert!(status.success(), "RR compile failed for {}", rr_path.display());
+    assert!(
+        status.success(),
+        "RR compile failed for {}",
+        rr_path.display()
+    );
 
     let code = fs::read_to_string(&out_path).expect("failed to read compiled R");
     assert!(
@@ -41,5 +45,8 @@ fn shifted(x) {
     let has_rr_index_read_call = code.lines().any(|line| {
         line.contains("rr_index1_read(") && !line.contains("rr_index1_read <- function")
     });
-    assert!(!has_rr_index_read_call, "expected no rr_index1_read call sites in shifted vectorized code");
+    assert!(
+        !has_rr_index_read_call,
+        "expected no rr_index1_read call sites in shifted vectorized code"
+    );
 }

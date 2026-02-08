@@ -1,4 +1,4 @@
-﻿#![allow(dead_code)]
+#![allow(dead_code)]
 
 use crate::utils::Span;
 use std::env;
@@ -8,13 +8,13 @@ pub type RR<T> = Result<T, RRException>;
 
 #[derive(Debug, Clone)]
 pub enum RRCode {
-    E0001, // Unexpected Token
-    E1001, // Undefined Variable
-    E1002, // Type Mismatch
-    E1003, // Definite Assignment Violation
-    E2001, // Bound Check Failure
-    E2007, // Index out of bounds (logical)
-    E9999, // Internal Error
+    E0001,   // Unexpected Token
+    E1001,   // Undefined Variable
+    E1002,   // Type Mismatch
+    E1003,   // Definite Assignment Violation
+    E2001,   // Bound Check Failure
+    E2007,   // Index out of bounds (logical)
+    E9999,   // Internal Error
     ICE9001, // Internal Compiler Error
 }
 
@@ -48,7 +48,17 @@ impl RRCode {
 }
 
 #[derive(Debug, Clone)]
-pub enum Stage { Lex, Parse, Lower, Mir, Opt, Codegen, Runtime, Runner, Ice }
+pub enum Stage {
+    Lex,
+    Parse,
+    Lower,
+    Mir,
+    Opt,
+    Codegen,
+    Runtime,
+    Runner,
+    Ice,
+}
 
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -100,7 +110,10 @@ impl RRException {
     }
 
     pub fn push_frame(mut self, name: impl Into<String>, span: Option<Span>) -> Self {
-        self.stacktrace.push(Frame { name: name.into(), span });
+        self.stacktrace.push(Frame {
+            name: name.into(),
+            span,
+        });
         self
     }
 
@@ -235,11 +248,7 @@ impl RRException {
             let caret = format!("{}^", indent);
             println!(
                 "{}",
-                style(
-                    color,
-                    palette_for_module(self.module).caret,
-                    &caret
-                )
+                style(color, palette_for_module(self.module).caret, &caret)
             );
         }
     }
@@ -264,8 +273,7 @@ fn palette_for_module(module: &str) -> ErrorPalette {
             note_r: "1;94",
             hint: "1;92",
         }
-    } else
-    if module.contains("ParseError") || module.contains("LexError") {
+    } else if module.contains("ParseError") || module.contains("LexError") {
         ErrorPalette {
             header: "1;95",
             code: "1;35",

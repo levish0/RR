@@ -1,4 +1,4 @@
-﻿use crate::mir::*;
+use crate::mir::*;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -8,10 +8,23 @@ pub enum VerifyError {
     BadBlock(BlockId),
     BadOperand(ValueId),
     BadTerminator(BlockId),
-    UseBeforeDef { block: BlockId, value: ValueId },
-    InvalidPhiArgs { phi_val: ValueId, expected: usize, got: usize },
-    InvalidPhiSource { phi_val: ValueId, block: BlockId },
-    UndefinedVar { var: VarId, value: ValueId },
+    UseBeforeDef {
+        block: BlockId,
+        value: ValueId,
+    },
+    InvalidPhiArgs {
+        phi_val: ValueId,
+        expected: usize,
+        got: usize,
+    },
+    InvalidPhiSource {
+        phi_val: ValueId,
+        block: BlockId,
+    },
+    UndefinedVar {
+        var: VarId,
+        value: ValueId,
+    },
 }
 
 impl fmt::Display for VerifyError {
@@ -21,10 +34,26 @@ impl fmt::Display for VerifyError {
             VerifyError::BadBlock(b) => write!(f, "Invalid BlockId: {}", b),
             VerifyError::BadOperand(v) => write!(f, "Invalid Operand ValueId: {}", v),
             VerifyError::BadTerminator(b) => write!(f, "Invalid Terminator in Block: {}", b),
-            VerifyError::UseBeforeDef { block, value } => write!(f, "Use before def in Block {}: Value {}", block, value),
-            VerifyError::InvalidPhiArgs { phi_val, expected, got } => write!(f, "Phi {} has wrong arg count. Expected {}, got {}", phi_val, expected, got),
-            VerifyError::InvalidPhiSource { phi_val, block } => write!(f, "Phi {} references invalid predecessor block {}", phi_val, block),
-            VerifyError::UndefinedVar { var, value } => write!(f, "Value {} refers to undefined var '{}'", value, var),
+            VerifyError::UseBeforeDef { block, value } => {
+                write!(f, "Use before def in Block {}: Value {}", block, value)
+            }
+            VerifyError::InvalidPhiArgs {
+                phi_val,
+                expected,
+                got,
+            } => write!(
+                f,
+                "Phi {} has wrong arg count. Expected {}, got {}",
+                phi_val, expected, got
+            ),
+            VerifyError::InvalidPhiSource { phi_val, block } => write!(
+                f,
+                "Phi {} references invalid predecessor block {}",
+                phi_val, block
+            ),
+            VerifyError::UndefinedVar { var, value } => {
+                write!(f, "Value {} refers to undefined var '{}'", value, var)
+            }
         }
     }
 }
@@ -59,7 +88,10 @@ pub fn verify_ir(fn_ir: &FnIR) -> Result<(), VerifyError> {
                     check_val(fn_ir, *v)?;
                     check_blk(fn_ir, *b)?;
                     if !seen.insert(*b) {
-                        return Err(VerifyError::InvalidPhiSource { phi_val: vid, block: *b });
+                        return Err(VerifyError::InvalidPhiSource {
+                            phi_val: vid,
+                            block: *b,
+                        });
                     }
                 }
             }
@@ -98,7 +130,11 @@ pub fn verify_ir(fn_ir: &FnIR) -> Result<(), VerifyError> {
                 check_blk(fn_ir, *target)?;
                 preds[*target].push(bid);
             }
-            Terminator::If { cond, then_bb, else_bb } => {
+            Terminator::If {
+                cond,
+                then_bb,
+                else_bb,
+            } => {
                 check_val(fn_ir, *cond)?;
                 check_blk(fn_ir, *then_bb)?;
                 check_blk(fn_ir, *else_bb)?;
@@ -128,7 +164,9 @@ pub fn verify_ir(fn_ir: &FnIR) -> Result<(), VerifyError> {
                     check_val(fn_ir, *idx)?;
                     check_val(fn_ir, *val)?;
                 }
-                Instr::StoreIndex2D { base, r, c, val, .. } => {
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => {
                     check_val(fn_ir, *base)?;
                     check_val(fn_ir, *r)?;
                     check_val(fn_ir, *c)?;
@@ -150,7 +188,10 @@ pub fn verify_ir(fn_ir: &FnIR) -> Result<(), VerifyError> {
         let val = &fn_ir.values[vid];
         if let Some(name) = &val.origin_var {
             if !assigned_vars.contains(name) && !is_reserved_binding(name) {
-                return Err(VerifyError::UndefinedVar { var: name.clone(), value: vid });
+                return Err(VerifyError::UndefinedVar {
+                    var: name.clone(),
+                    value: vid,
+                });
             }
         }
     }
@@ -187,11 +228,19 @@ fn compute_reachable(fn_ir: &FnIR) -> HashSet<BlockId> {
         if let Some(blk) = fn_ir.blocks.get(bid) {
             match &blk.term {
                 Terminator::Goto(target) => {
-                    if reachable.insert(*target) { queue.push(*target); }
+                    if reachable.insert(*target) {
+                        queue.push(*target);
+                    }
                 }
-                Terminator::If { then_bb, else_bb, .. } => {
-                    if reachable.insert(*then_bb) { queue.push(*then_bb); }
-                    if reachable.insert(*else_bb) { queue.push(*else_bb); }
+                Terminator::If {
+                    then_bb, else_bb, ..
+                } => {
+                    if reachable.insert(*then_bb) {
+                        queue.push(*then_bb);
+                    }
+                    if reachable.insert(*else_bb) {
+                        queue.push(*else_bb);
+                    }
                 }
                 _ => {}
             }
@@ -206,24 +255,36 @@ fn collect_used_values(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> HashSet<Va
     let mut worklist: Vec<ValueId> = Vec::new();
 
     for bid in 0..fn_ir.blocks.len() {
-        if !reachable.contains(&bid) { continue; }
+        if !reachable.contains(&bid) {
+            continue;
+        }
         let blk = &fn_ir.blocks[bid];
         for instr in &blk.instrs {
             match instr {
                 Instr::Assign { src, .. } => {
-                    if used.insert(*src) { worklist.push(*src); }
+                    if used.insert(*src) {
+                        worklist.push(*src);
+                    }
                 }
                 Instr::Eval { val, .. } => {
-                    if used.insert(*val) { worklist.push(*val); }
+                    if used.insert(*val) {
+                        worklist.push(*val);
+                    }
                 }
                 Instr::StoreIndex1D { base, idx, val, .. } => {
                     for v in [*base, *idx, *val] {
-                        if used.insert(v) { worklist.push(v); }
+                        if used.insert(v) {
+                            worklist.push(v);
+                        }
                     }
                 }
-                Instr::StoreIndex2D { base, r, c, val, .. } => {
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => {
                     for v in [*base, *r, *c, *val] {
-                        if used.insert(v) { worklist.push(v); }
+                        if used.insert(v) {
+                            worklist.push(v);
+                        }
                     }
                 }
             }
@@ -231,10 +292,14 @@ fn collect_used_values(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> HashSet<Va
 
         match &blk.term {
             Terminator::If { cond, .. } => {
-                if used.insert(*cond) { worklist.push(*cond); }
+                if used.insert(*cond) {
+                    worklist.push(*cond);
+                }
             }
             Terminator::Return(Some(v)) => {
-                if used.insert(*v) { worklist.push(*v); }
+                if used.insert(*v) {
+                    worklist.push(*v);
+                }
             }
             _ => {}
         }
@@ -244,37 +309,63 @@ fn collect_used_values(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> HashSet<Va
         let val = &fn_ir.values[vid];
         match &val.kind {
             ValueKind::Binary { lhs, rhs, .. } => {
-                if used.insert(*lhs) { worklist.push(*lhs); }
-                if used.insert(*rhs) { worklist.push(*rhs); }
+                if used.insert(*lhs) {
+                    worklist.push(*lhs);
+                }
+                if used.insert(*rhs) {
+                    worklist.push(*rhs);
+                }
             }
             ValueKind::Unary { rhs, .. } => {
-                if used.insert(*rhs) { worklist.push(*rhs); }
+                if used.insert(*rhs) {
+                    worklist.push(*rhs);
+                }
             }
             ValueKind::Call { args, .. } => {
                 for a in args {
-                    if used.insert(*a) { worklist.push(*a); }
+                    if used.insert(*a) {
+                        worklist.push(*a);
+                    }
                 }
             }
             ValueKind::Phi { args } => {
                 for (a, _) in args {
-                    if used.insert(*a) { worklist.push(*a); }
+                    if used.insert(*a) {
+                        worklist.push(*a);
+                    }
                 }
             }
             ValueKind::Index1D { base, idx, .. } => {
-                if used.insert(*base) { worklist.push(*base); }
-                if used.insert(*idx) { worklist.push(*idx); }
+                if used.insert(*base) {
+                    worklist.push(*base);
+                }
+                if used.insert(*idx) {
+                    worklist.push(*idx);
+                }
             }
             ValueKind::Index2D { base, r, c } => {
-                if used.insert(*base) { worklist.push(*base); }
-                if used.insert(*r) { worklist.push(*r); }
-                if used.insert(*c) { worklist.push(*c); }
+                if used.insert(*base) {
+                    worklist.push(*base);
+                }
+                if used.insert(*r) {
+                    worklist.push(*r);
+                }
+                if used.insert(*c) {
+                    worklist.push(*c);
+                }
             }
             ValueKind::Len { base } | ValueKind::Indices { base } => {
-                if used.insert(*base) { worklist.push(*base); }
+                if used.insert(*base) {
+                    worklist.push(*base);
+                }
             }
             ValueKind::Range { start, end } => {
-                if used.insert(*start) { worklist.push(*start); }
-                if used.insert(*end) { worklist.push(*end); }
+                if used.insert(*start) {
+                    worklist.push(*start);
+                }
+                if used.insert(*end) {
+                    worklist.push(*end);
+                }
             }
             _ => {}
         }

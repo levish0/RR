@@ -71,7 +71,10 @@ fn break_next_and_list_pattern_match_lower_to_mir() {
     };
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let out_dir = root.join("target").join("tests").join("mir_lowering_loop_match");
+    let out_dir = root
+        .join("target")
+        .join("tests")
+        .join("mir_lowering_loop_match");
     fs::create_dir_all(&out_dir).expect("failed to create target/tests/mir_lowering_loop_match");
     let rr_bin = PathBuf::from(env!("CARGO_BIN_EXE_RR"));
 

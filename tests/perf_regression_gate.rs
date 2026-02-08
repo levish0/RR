@@ -64,7 +64,10 @@ fn compile_elapsed_ms(rr_bin: &PathBuf, input: &PathBuf, output: &PathBuf, level
 #[test]
 fn compile_time_regression_gate() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let sandbox_root = root.join("target").join("tests").join("perf_regression_gate");
+    let sandbox_root = root
+        .join("target")
+        .join("tests")
+        .join("perf_regression_gate");
     fs::create_dir_all(&sandbox_root).expect("failed to create sandbox root");
     let proj_dir = unique_dir(&sandbox_root, "proj");
     fs::create_dir_all(&proj_dir).expect("failed to create project dir");
@@ -103,4 +106,3 @@ fn compile_time_regression_gate() {
         ratio_limit
     );
 }
-

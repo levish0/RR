@@ -1,9 +1,8 @@
-﻿
 use crate::mir::*;
 
 pub fn optimize(fn_ir: &mut FnIR) -> bool {
     let mut changed = false;
-    
+
     // TCO: If we have a tail call to the current function, replace it with a loop.
     // 1. Find Return(Call(self, ...))
     for bid in 0..fn_ir.blocks.len() {
@@ -53,7 +52,7 @@ fn perform_tco(fn_ir: &mut FnIR, bid: BlockId) -> bool {
     for (i, arg_id) in args.iter().enumerate() {
         moves.push(crate::mir::opt::parallel_copy::Move {
             dst: param_vars[i].clone(),
-            src: *arg_id
+            src: *arg_id,
         });
     }
 
@@ -66,7 +65,6 @@ fn perform_tco(fn_ir: &mut FnIR, bid: BlockId) -> bool {
     fn_ir.blocks[bid].instrs = new_instrs;
     let body_head = fn_ir.body_head;
     fn_ir.blocks[bid].term = Terminator::Goto(body_head);
-    
+
     true
 }
-

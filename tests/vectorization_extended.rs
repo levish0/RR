@@ -11,7 +11,12 @@ fn compile_rr(rr_bin: &Path, rr_src: &Path, out: &Path, level: &str) {
         .arg(level)
         .status()
         .expect("failed to run RR compiler");
-    assert!(status.success(), "RR compile failed for {} ({})", rr_src.display(), level);
+    assert!(
+        status.success(),
+        "RR compile failed for {} ({})",
+        rr_src.display(),
+        level
+    );
 }
 
 fn rscript_path() -> Option<String> {
@@ -46,7 +51,10 @@ fn run_rscript(path: &str, script: &Path) -> (i32, String) {
 #[test]
 fn vectorization_supports_reduction_conditional_and_recurrence() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let out_dir = root.join("target").join("tests").join("vectorization_extended");
+    let out_dir = root
+        .join("target")
+        .join("tests")
+        .join("vectorization_extended");
     fs::create_dir_all(&out_dir).expect("failed to create test output dir");
 
     let rr_src = r#"
@@ -370,7 +378,10 @@ print(mat_col_reduce(3, 4, 2));
     compile_rr(&rr_bin, &rr_path, &o1, "-O1");
 
     let code = fs::read_to_string(&o1).expect("failed to read O1 output");
-    assert!(code.contains("sum("), "expected reduction vectorization to use sum(...)");
+    assert!(
+        code.contains("sum("),
+        "expected reduction vectorization to use sum(...)"
+    );
     assert!(
         code.contains("rr_ifelse_strict("),
         "expected conditional map vectorization to use rr_ifelse_strict(...)"
@@ -387,14 +398,26 @@ print(mat_col_reduce(3, 4, 2));
         code.contains("(-2L)") || code.contains("-(2L)") || code.contains("-2"),
         "expected subtraction recurrence to preserve negative delta"
     );
-    assert!(code.contains("abs("), "expected call-map vectorization to use abs(...)");
-    assert!(code.contains("pmax("), "expected multi-arg call-map vectorization to use pmax(...)");
+    assert!(
+        code.contains("abs("),
+        "expected call-map vectorization to use abs(...)"
+    );
+    assert!(
+        code.contains("pmax("),
+        "expected multi-arg call-map vectorization to use pmax(...)"
+    );
     assert!(
         code.contains("rr_same_or_scalar("),
         "expected invariant call-map args to be guarded by rr_same_or_scalar(...)"
     );
-    assert!(code.contains("log10("), "expected extended call-map vectorization to use log10(...)");
-    assert!(code.contains("atan2("), "expected extended call-map vectorization to use atan2(...)");
+    assert!(
+        code.contains("log10("),
+        "expected extended call-map vectorization to use log10(...)"
+    );
+    assert!(
+        code.contains("atan2("),
+        "expected extended call-map vectorization to use atan2(...)"
+    );
     assert!(
         code.contains("abs((x + 1L))") || code.contains(".tachyon_callmap_arg0_0 <- (x + 1L)"),
         "expected nested call-map vectorization for abs(x[i]+1) with optional arg hoisting"

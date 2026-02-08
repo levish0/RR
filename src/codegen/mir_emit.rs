@@ -1,8 +1,7 @@
-﻿
 use crate::error::RR;
+use crate::mir::def::{BinOp, FnIR, Instr, Lit, Terminator, UnaryOp, Value, ValueKind};
+use crate::mir::structurizer::{StructuredBlock, Structurizer};
 use crate::utils::Span;
-use crate::mir::def::{FnIR, Terminator, Instr, ValueKind, Lit, BinOp, UnaryOp, Value};
-use crate::mir::structurizer::{Structurizer, StructuredBlock};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -17,7 +16,9 @@ pub struct MirEmitter {
 
 impl MirEmitter {
     pub fn new() -> Self {
-        Self { backend: RBackend::new() }
+        Self {
+            backend: RBackend::new(),
+        }
     }
 
     pub fn emit(&mut self, fn_ir: &FnIR) -> RR<(String, Vec<MapEntry>)> {
@@ -50,7 +51,11 @@ impl RBackend {
     }
 
     pub fn emit_function(&mut self, fn_ir: &FnIR) -> Result<String, crate::error::RRException> {
-        if fn_ir.values.iter().any(|v| matches!(v.kind, ValueKind::Phi { .. })) {
+        if fn_ir
+            .values
+            .iter()
+            .any(|v| matches!(v.kind, ValueKind::Phi { .. }))
+        {
             return Err(crate::error::RRException::new(
                 "codegen",
                 crate::error::RRCode::ICE9001,
@@ -64,7 +69,7 @@ impl RBackend {
         self.source_map.clear();
         self.value_bindings.clear();
         self.var_versions.clear();
-        
+
         self.write(&format!("{} <- function(", fn_ir.name));
         let param_strs: Vec<String> = fn_ir.params.iter().map(|p| p.clone()).collect();
         self.write(&param_strs.join(", "));
@@ -104,7 +109,12 @@ impl RBackend {
         }
     }
 
-    fn emit_instr(&mut self, instr: &Instr, values: &[Value], params: &[String]) -> Result<(), crate::error::RRException> {
+    fn emit_instr(
+        &mut self,
+        instr: &Instr,
+        values: &[Value],
+        params: &[String],
+    ) -> Result<(), crate::error::RRException> {
         match instr {
             Instr::Assign { dst, src, span } => {
                 let label = format!("assign {}", dst);
@@ -127,13 +137,21 @@ impl RBackend {
                 let v = self.resolve_val(*val, values, params, false);
                 self.write_stmt(&v);
             }
-            Instr::StoreIndex1D { base, idx, val, is_vector, is_safe, is_na_safe, span } => {
-                 self.emit_mark(*span, Some("store"));
-                 self.record_span(*span);
-                 let base_val = self.resolve_val(*base, values, params, false);
-                 let idx_val = self.resolve_val(*idx, values, params, false);
-                 let src_val = self.resolve_val(*val, values, params, false);
-                 
+            Instr::StoreIndex1D {
+                base,
+                idx,
+                val,
+                is_vector,
+                is_safe,
+                is_na_safe,
+                span,
+            } => {
+                self.emit_mark(*span, Some("store"));
+                self.record_span(*span);
+                let base_val = self.resolve_val(*base, values, params, false);
+                let idx_val = self.resolve_val(*idx, values, params, false);
+                let src_val = self.resolve_val(*val, values, params, false);
+
                 if *is_vector {
                     self.write_stmt(&format!("{} <- {}", base_val, src_val));
                     self.bump_base_version_if_named(*base, values);
@@ -146,9 +164,15 @@ impl RBackend {
                     }
                     // Indexed store mutates the base object; invalidate stale bindings for that variable.
                     self.bump_base_version_if_named(*base, values);
-                 }
+                }
             }
-            Instr::StoreIndex2D { base, r, c, val, span } => {
+            Instr::StoreIndex2D {
+                base,
+                r,
+                c,
+                val,
+                span,
+            } => {
                 self.emit_mark(*span, Some("store2d"));
                 self.record_span(*span);
                 let base_val = self.resolve_val(*base, values, params, false);
@@ -157,7 +181,10 @@ impl RBackend {
                 let src_val = self.resolve_val(*val, values, params, false);
                 let r_idx = format!("rr_index1_write({}, \"row\")", r_val);
                 let c_idx = format!("rr_index1_write({}, \"col\")", c_val);
-                self.write_stmt(&format!("{}[{}, {}] <- {}", base_val, r_idx, c_idx, src_val));
+                self.write_stmt(&format!(
+                    "{}[{}, {}] <- {}",
+                    base_val, r_idx, c_idx, src_val
+                ));
                 self.bump_base_version_if_named(*base, values);
             }
         }
@@ -194,14 +221,26 @@ impl RBackend {
         }
     }
 
-    fn emit_term(&mut self, term: &Terminator, values: &[Value], params: &[String]) -> Result<(), crate::error::RRException> {
+    fn emit_term(
+        &mut self,
+        term: &Terminator,
+        values: &[Value],
+        params: &[String],
+    ) -> Result<(), crate::error::RRException> {
         match term {
             Terminator::Goto(t) => {
-                self.write_stmt(&format!("break; # goto {}", t)); 
+                self.write_stmt(&format!("break; # goto {}", t));
             }
-            Terminator::If { cond, then_bb, else_bb } => {
+            Terminator::If {
+                cond,
+                then_bb,
+                else_bb,
+            } => {
                 let c = self.resolve_val(*cond, values, params, false);
-                self.write_stmt(&format!("if (rr_truthy1({}, \"condition\")) {{ # goto {}/{}", c, then_bb, else_bb));
+                self.write_stmt(&format!(
+                    "if (rr_truthy1({}, \"condition\")) {{ # goto {}/{}",
+                    c, then_bb, else_bb
+                ));
                 self.write_stmt("}");
             }
             Terminator::Return(Some(v)) => {
@@ -219,7 +258,11 @@ impl RBackend {
         Ok(())
     }
 
-    fn emit_structured(&mut self, node: &StructuredBlock, fn_ir: &FnIR) -> Result<(), crate::error::RRException> {
+    fn emit_structured(
+        &mut self,
+        node: &StructuredBlock,
+        fn_ir: &FnIR,
+    ) -> Result<(), crate::error::RRException> {
         match node {
             StructuredBlock::Sequence(items) => {
                 for item in items {
@@ -235,7 +278,11 @@ impl RBackend {
                     self.emit_instr(instr, &fn_ir.values, &fn_ir.params)?;
                 }
             }
-            StructuredBlock::If { cond, then_body, else_body } => {
+            StructuredBlock::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 let cond_span = fn_ir.values[*cond].span;
                 self.emit_mark(cond_span, Some("if"));
                 self.record_span(cond_span);
@@ -254,7 +301,12 @@ impl RBackend {
                     self.write_stmt("}");
                 }
             }
-            StructuredBlock::Loop { header, cond, continue_on_true, body } => {
+            StructuredBlock::Loop {
+                header,
+                cond,
+                continue_on_true,
+                body,
+            } => {
                 self.write_stmt("repeat {");
                 self.indent += 1;
 
@@ -286,33 +338,40 @@ impl RBackend {
             StructuredBlock::Next => {
                 self.write_stmt("next");
             }
-            StructuredBlock::Return(v) => {
-                match v {
-                    Some(val) => {
-                        let r = self.resolve_val(*val, &fn_ir.values, &fn_ir.params, false);
-                        self.write_stmt(&format!("return({})", r));
-                    }
-                    None => self.write_stmt("return(NULL)"),
+            StructuredBlock::Return(v) => match v {
+                Some(val) => {
+                    let r = self.resolve_val(*val, &fn_ir.values, &fn_ir.params, false);
+                    self.write_stmt(&format!("return({})", r));
                 }
-            }
+                None => self.write_stmt("return(NULL)"),
+            },
         }
         Ok(())
     }
 
-    fn resolve_val(&self, val_id: usize, values: &[Value], params: &[String], prefer_expr: bool) -> String {
+    fn resolve_val(
+        &self,
+        val_id: usize,
+        values: &[Value],
+        params: &[String],
+        prefer_expr: bool,
+    ) -> String {
         let val = &values[val_id];
-        
-        // Strategy: 
+
+        // Strategy:
         // 1. If prefer_expr is false (we are using the value) and it has a name, use the name.
         //    (Except for literals which are better as literals)
         // 2. Otherwise, resolve the expression.
-        
+
         // Use variable names only for value kinds that are stable to reference by name.
         // For expression values (e.g. Binary/Index), forcing the name can miscompile after
         // CSE/GVN when a value reuses a variable-origin annotation.
         let should_use_name = !prefer_expr
             && val.origin_var.is_some()
-            && matches!(val.kind, ValueKind::Load { .. } | ValueKind::Param { .. } | ValueKind::Call { .. });
+            && matches!(
+                val.kind,
+                ValueKind::Load { .. } | ValueKind::Param { .. } | ValueKind::Call { .. }
+            );
         if should_use_name {
             return val.origin_var.as_ref().unwrap().clone();
         }
@@ -334,19 +393,36 @@ impl RBackend {
                 let l = self.resolve_val(*lhs, values, params, false);
                 let r = self.resolve_val(*rhs, values, params, false);
                 let op_str = match op {
-                    BinOp::Add => "+", BinOp::Sub => "-", BinOp::Mul => "*", BinOp::Div => "/", 
-                    BinOp::Mod => "%%", BinOp::MatMul => "%*%", BinOp::Eq => "==", BinOp::Ne => "!=", 
-                    BinOp::Lt => "<", BinOp::Le => "<=", BinOp::Gt => ">", BinOp::Ge => ">=",
-                    BinOp::And => "&", BinOp::Or => "|"
+                    BinOp::Add => "+",
+                    BinOp::Sub => "-",
+                    BinOp::Mul => "*",
+                    BinOp::Div => "/",
+                    BinOp::Mod => "%%",
+                    BinOp::MatMul => "%*%",
+                    BinOp::Eq => "==",
+                    BinOp::Ne => "!=",
+                    BinOp::Lt => "<",
+                    BinOp::Le => "<=",
+                    BinOp::Gt => ">",
+                    BinOp::Ge => ">=",
+                    BinOp::And => "&",
+                    BinOp::Or => "|",
                 };
                 format!("({} {} {})", l, op_str, r)
             }
             ValueKind::Unary { op, rhs } => {
                 let r = self.resolve_val(*rhs, values, params, false);
-                let op_str = match op { UnaryOp::Neg => "-", UnaryOp::Not => "!" };
+                let op_str = match op {
+                    UnaryOp::Neg => "-",
+                    UnaryOp::Not => "!",
+                };
                 format!("({}({}))", op_str, r)
             }
-            ValueKind::Call { callee, args, names } => {
+            ValueKind::Call {
+                callee,
+                args,
+                names,
+            } => {
                 let mut arg_strs: Vec<String> = Vec::with_capacity(args.len());
                 for (i, a) in args.iter().enumerate() {
                     let v = self.resolve_val(*a, values, params, false);
@@ -362,12 +438,24 @@ impl RBackend {
                 format!("length({})", self.resolve_val(*base, values, params, false))
             }
             ValueKind::Range { start, end } => {
-                format!("{}:{}", self.resolve_val(*start, values, params, false), self.resolve_val(*end, values, params, false))
+                format!(
+                    "{}:{}",
+                    self.resolve_val(*start, values, params, false),
+                    self.resolve_val(*end, values, params, false)
+                )
             }
             ValueKind::Indices { base } => {
-                format!("(seq_along({}) - 1L)", self.resolve_val(*base, values, params, false))
+                format!(
+                    "(seq_along({}) - 1L)",
+                    self.resolve_val(*base, values, params, false)
+                )
             }
-            ValueKind::Index1D { base, idx, is_safe, is_na_safe } => {
+            ValueKind::Index1D {
+                base,
+                idx,
+                is_safe,
+                is_na_safe,
+            } => {
                 let b = self.resolve_val(*base, values, params, false);
                 let i = self.resolve_val(*idx, values, params, false);
                 if *is_safe && *is_na_safe {
@@ -404,13 +492,13 @@ impl RBackend {
     fn write(&mut self, s: &str) {
         self.output.push_str(s);
     }
-    
+
     fn write_indent(&mut self) {
         for _ in 0..self.indent {
             self.output.push_str("  ");
         }
     }
-    
+
     fn newline(&mut self) {
         self.output.push('\n');
         self.current_line += 1;
@@ -427,9 +515,15 @@ impl RBackend {
             return;
         }
         self.write_indent();
-        self.write(&format!("rr_mark({}, {});", span.start_line, span.start_col));
+        self.write(&format!(
+            "rr_mark({}, {});",
+            span.start_line, span.start_col
+        ));
         if let Some(lbl) = label {
-            self.write(&format!(" # rr:{}:{} {}", span.start_line, span.start_col, lbl));
+            self.write(&format!(
+                " # rr:{}:{} {}",
+                span.start_line, span.start_col, lbl
+            ));
         } else {
             self.write(&format!(" # rr:{}:{}", span.start_line, span.start_col));
         }

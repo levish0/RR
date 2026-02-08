@@ -1,4 +1,3 @@
-﻿
 use crate::mir::*;
 use crate::syntax::ast::Lit;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -13,23 +12,32 @@ enum Lattice {
 pub struct MirSCCP;
 
 impl MirSCCP {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn optimize(&self, fn_ir: &mut FnIR) -> bool {
         let (lattice, executable_blocks, _executable_edges) = self.solve(fn_ir);
         self.apply_results(fn_ir, &lattice, &executable_blocks)
     }
 
-    fn solve(&self, fn_ir: &FnIR) -> (HashMap<ValueId, Lattice>, HashSet<BlockId>, HashSet<(BlockId, BlockId)>) {
+    fn solve(
+        &self,
+        fn_ir: &FnIR,
+    ) -> (
+        HashMap<ValueId, Lattice>,
+        HashSet<BlockId>,
+        HashSet<(BlockId, BlockId)>,
+    ) {
         let mut lattice = HashMap::new();
         let mut executable_edges = HashSet::new(); // HashSet<(from, to)>
         let mut executable_blocks = HashSet::new();
         let mut flow_worklist = VecDeque::new();
         let mut ssa_worklist = VecDeque::new();
-        
+
         // Initial state
         flow_worklist.push_back((fn_ir.entry, fn_ir.entry)); // Mock edge for entry
-        
+
         // Initial lattice state: Constants are Constant, others are Top
         for (id, val) in fn_ir.values.iter().enumerate() {
             if let ValueKind::Const(lit) = &val.kind {
@@ -37,7 +45,7 @@ impl MirSCCP {
                 ssa_worklist.push_back(id);
             }
         }
-        
+
         // Maps value to its users
         let mut users: HashMap<ValueId, Vec<User>> = HashMap::new();
         self.build_user_map(fn_ir, &mut users);
@@ -47,16 +55,29 @@ impl MirSCCP {
                 if executable_edges.insert((from, to)) {
                     let newly_executable_block = executable_blocks.insert(to);
                     if newly_executable_block {
-                        self.visit_block(to, fn_ir, &mut lattice, &executable_edges, &mut flow_worklist, &mut ssa_worklist);
+                        self.visit_block(
+                            to,
+                            fn_ir,
+                            &mut lattice,
+                            &executable_edges,
+                            &mut flow_worklist,
+                            &mut ssa_worklist,
+                        );
                     }
-                    
+
                     // Re-evaluate Phis in the 'to' block because a new incoming edge is executable
                     for (id, val) in fn_ir.values.iter().enumerate() {
                         if val.phi_block == Some(to) {
                             if let ValueKind::Phi { args } = &val.kind {
                                 // Basic check: does this Phi have an argument from 'from'?
                                 if args.iter().any(|(_, p)| *p == from) {
-                                    self.visit_value(id, fn_ir, &mut lattice, &executable_edges, &mut ssa_worklist);
+                                    self.visit_value(
+                                        id,
+                                        fn_ir,
+                                        &mut lattice,
+                                        &executable_edges,
+                                        &mut ssa_worklist,
+                                    );
                                 }
                             }
                         }
@@ -68,11 +89,24 @@ impl MirSCCP {
                         match user {
                             User::Block(bid) => {
                                 if executable_blocks.contains(bid) {
-                                    self.visit_block(*bid, fn_ir, &mut lattice, &executable_edges, &mut flow_worklist, &mut ssa_worklist);
+                                    self.visit_block(
+                                        *bid,
+                                        fn_ir,
+                                        &mut lattice,
+                                        &executable_edges,
+                                        &mut flow_worklist,
+                                        &mut ssa_worklist,
+                                    );
                                 }
                             }
                             User::Value(target_val) => {
-                                self.visit_value(*target_val, fn_ir, &mut lattice, &executable_edges, &mut ssa_worklist);
+                                self.visit_value(
+                                    *target_val,
+                                    fn_ir,
+                                    &mut lattice,
+                                    &executable_edges,
+                                    &mut ssa_worklist,
+                                );
                             }
                         }
                     }
@@ -89,9 +123,17 @@ impl MirSCCP {
         (lattice, executable_blocks)
     }
 
-    fn visit_block(&self, bid: BlockId, fn_ir: &FnIR, lattice: &mut HashMap<ValueId, Lattice>, executable_edges: &HashSet<(BlockId, BlockId)>, flow_worklist: &mut VecDeque<(BlockId, BlockId)>, ssa_worklist: &mut VecDeque<ValueId>) {
+    fn visit_block(
+        &self,
+        bid: BlockId,
+        fn_ir: &FnIR,
+        lattice: &mut HashMap<ValueId, Lattice>,
+        executable_edges: &HashSet<(BlockId, BlockId)>,
+        flow_worklist: &mut VecDeque<(BlockId, BlockId)>,
+        ssa_worklist: &mut VecDeque<ValueId>,
+    ) {
         let block = &fn_ir.blocks[bid];
-        
+
         for instr in &block.instrs {
             match instr {
                 Instr::Assign { src, .. } | Instr::Eval { val: src, .. } => {
@@ -102,7 +144,9 @@ impl MirSCCP {
                     self.visit_value(*idx, fn_ir, lattice, executable_edges, ssa_worklist);
                     self.visit_value(*val, fn_ir, lattice, executable_edges, ssa_worklist);
                 }
-                Instr::StoreIndex2D { base, r, c, val, .. } => {
+                Instr::StoreIndex2D {
+                    base, r, c, val, ..
+                } => {
                     self.visit_value(*base, fn_ir, lattice, executable_edges, ssa_worklist);
                     self.visit_value(*r, fn_ir, lattice, executable_edges, ssa_worklist);
                     self.visit_value(*c, fn_ir, lattice, executable_edges, ssa_worklist);
@@ -115,7 +159,11 @@ impl MirSCCP {
             Terminator::Goto(target) => {
                 flow_worklist.push_back((bid, *target));
             }
-            Terminator::If { cond, then_bb, else_bb } => {
+            Terminator::If {
+                cond,
+                then_bb,
+                else_bb,
+            } => {
                 self.visit_value(*cond, fn_ir, lattice, executable_edges, ssa_worklist);
                 match lattice.get(cond).cloned().unwrap_or(Lattice::Top) {
                     Lattice::Constant(Lit::Bool(true)) => {
@@ -132,7 +180,7 @@ impl MirSCCP {
                     _ => {
                         flow_worklist.push_back((bid, *then_bb));
                         flow_worklist.push_back((bid, *else_bb));
-                    } 
+                    }
                 }
             }
             Terminator::Return(Some(v)) => {
@@ -142,7 +190,14 @@ impl MirSCCP {
         }
     }
 
-    fn visit_value(&self, val_id: ValueId, fn_ir: &FnIR, lattice: &mut HashMap<ValueId, Lattice>, executable_edges: &HashSet<(BlockId, BlockId)>, ssa_worklist: &mut VecDeque<ValueId>) {
+    fn visit_value(
+        &self,
+        val_id: ValueId,
+        fn_ir: &FnIR,
+        lattice: &mut HashMap<ValueId, Lattice>,
+        executable_edges: &HashSet<(BlockId, BlockId)>,
+        ssa_worklist: &mut VecDeque<ValueId>,
+    ) {
         let val = &fn_ir.values[val_id];
         let old_state = lattice.get(&val_id).cloned().unwrap_or(Lattice::Top);
 
@@ -201,7 +256,9 @@ impl MirSCCP {
                 }
                 merged
             }
-            ValueKind::Len { base } => self.eval_len(*base, fn_ir, lattice, executable_edges, ssa_worklist),
+            ValueKind::Len { base } => {
+                self.eval_len(*base, fn_ir, lattice, executable_edges, ssa_worklist)
+            }
             ValueKind::Index1D { base, idx, .. } => {
                 self.eval_index1d(*base, *idx, fn_ir, lattice, executable_edges, ssa_worklist)
             }
@@ -219,20 +276,18 @@ impl MirSCCP {
 
     fn eval_binary(&self, op: BinOp, l: Lattice, r: Lattice) -> Lattice {
         match (l, r) {
-            (Lattice::Constant(Lit::Int(lv)), Lattice::Constant(Lit::Int(rv))) => {
-                match op {
-                    BinOp::Add => Lattice::Constant(Lit::Int(lv + rv)),
-                    BinOp::Sub => Lattice::Constant(Lit::Int(lv - rv)),
-                    BinOp::Mul => Lattice::Constant(Lit::Int(lv * rv)),
-                    BinOp::Lt => Lattice::Constant(Lit::Bool(lv < rv)),
-                    BinOp::Le => Lattice::Constant(Lit::Bool(lv <= rv)),
-                    BinOp::Gt => Lattice::Constant(Lit::Bool(lv > rv)),
-                    BinOp::Ge => Lattice::Constant(Lit::Bool(lv >= rv)),
-                    BinOp::Eq => Lattice::Constant(Lit::Bool(lv == rv)),
-                    BinOp::Ne => Lattice::Constant(Lit::Bool(lv != rv)),
-                    _ => Lattice::Bottom,
-                }
-            }
+            (Lattice::Constant(Lit::Int(lv)), Lattice::Constant(Lit::Int(rv))) => match op {
+                BinOp::Add => Lattice::Constant(Lit::Int(lv + rv)),
+                BinOp::Sub => Lattice::Constant(Lit::Int(lv - rv)),
+                BinOp::Mul => Lattice::Constant(Lit::Int(lv * rv)),
+                BinOp::Lt => Lattice::Constant(Lit::Bool(lv < rv)),
+                BinOp::Le => Lattice::Constant(Lit::Bool(lv <= rv)),
+                BinOp::Gt => Lattice::Constant(Lit::Bool(lv > rv)),
+                BinOp::Ge => Lattice::Constant(Lit::Bool(lv >= rv)),
+                BinOp::Eq => Lattice::Constant(Lit::Bool(lv == rv)),
+                BinOp::Ne => Lattice::Constant(Lit::Bool(lv != rv)),
+                _ => Lattice::Bottom,
+            },
             (Lattice::Bottom, _) | (_, Lattice::Bottom) => Lattice::Bottom,
             (Lattice::Top, _) | (_, Lattice::Top) => Lattice::Top,
             _ => Lattice::Bottom,
@@ -402,7 +457,9 @@ impl MirSCCP {
                 }
                 Some(Lit::Int(index1 - 1))
             }
-            ValueKind::Call { callee, args, .. } if (callee == "c" || callee == "list") && !args.is_empty() => {
+            ValueKind::Call { callee, args, .. }
+                if (callee == "c" || callee == "list") && !args.is_empty() =>
+            {
                 let idx0 = (index1 - 1) as usize;
                 if idx0 >= args.len() {
                     return None;
@@ -429,39 +486,83 @@ impl MirSCCP {
             }
             "sqrt" if args.len() == 1 => {
                 let x = Self::const_numeric(&args[0])?;
-                if x < 0.0 { None } else { Some(Self::lit_from_f64(x.sqrt())) }
+                if x < 0.0 {
+                    None
+                } else {
+                    Some(Self::lit_from_f64(x.sqrt()))
+                }
             }
-            "sin" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.sin())),
-            "cos" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.cos())),
-            "tan" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.tan())),
-            "asin" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.asin())),
-            "acos" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.acos())),
-            "atan" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.atan())),
+            "sin" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.sin()))
+            }
+            "cos" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.cos()))
+            }
+            "tan" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.tan()))
+            }
+            "asin" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.asin()))
+            }
+            "acos" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.acos()))
+            }
+            "atan" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.atan()))
+            }
             "atan2" if args.len() == 2 => {
                 let y = Self::const_numeric(&args[0])?;
                 let x = Self::const_numeric(&args[1])?;
                 Some(Self::lit_from_f64(y.atan2(x)))
             }
-            "sinh" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.sinh())),
-            "cosh" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.cosh())),
-            "tanh" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.tanh())),
+            "sinh" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.sinh()))
+            }
+            "cosh" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.cosh()))
+            }
+            "tanh" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.tanh()))
+            }
             "log" if args.len() == 1 => {
                 let x = Self::const_numeric(&args[0])?;
-                if x <= 0.0 { None } else { Some(Self::lit_from_f64(x.ln())) }
+                if x <= 0.0 {
+                    None
+                } else {
+                    Some(Self::lit_from_f64(x.ln()))
+                }
             }
             "log10" if args.len() == 1 => {
                 let x = Self::const_numeric(&args[0])?;
-                if x <= 0.0 { None } else { Some(Self::lit_from_f64(x.log10())) }
+                if x <= 0.0 {
+                    None
+                } else {
+                    Some(Self::lit_from_f64(x.log10()))
+                }
             }
             "log2" if args.len() == 1 => {
                 let x = Self::const_numeric(&args[0])?;
-                if x <= 0.0 { None } else { Some(Self::lit_from_f64(x.log2())) }
+                if x <= 0.0 {
+                    None
+                } else {
+                    Some(Self::lit_from_f64(x.log2()))
+                }
             }
-            "exp" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.exp())),
-            "floor" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.floor())),
-            "ceiling" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.ceil())),
-            "trunc" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.trunc())),
-            "round" if args.len() == 1 => Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.round())),
+            "exp" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.exp()))
+            }
+            "floor" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.floor()))
+            }
+            "ceiling" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.ceil()))
+            }
+            "trunc" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.trunc()))
+            }
+            "round" if args.len() == 1 => {
+                Some(Self::lit_from_f64(Self::const_numeric(&args[0])?.round()))
+            }
             "round" if args.len() == 2 => {
                 let x = Self::const_numeric(&args[0])?;
                 let digits = Self::const_numeric(&args[1])?;
@@ -482,19 +583,27 @@ impl MirSCCP {
             }
             "min" if !args.is_empty() => {
                 let ns = nums?;
-                Some(Self::lit_from_f64(ns.into_iter().fold(f64::INFINITY, |a, b| a.min(b))))
+                Some(Self::lit_from_f64(
+                    ns.into_iter().fold(f64::INFINITY, |a, b| a.min(b)),
+                ))
             }
             "max" if !args.is_empty() => {
                 let ns = nums?;
-                Some(Self::lit_from_f64(ns.into_iter().fold(f64::NEG_INFINITY, |a, b| a.max(b))))
+                Some(Self::lit_from_f64(
+                    ns.into_iter().fold(f64::NEG_INFINITY, |a, b| a.max(b)),
+                ))
             }
             "pmin" if !args.is_empty() => {
                 let ns = nums?;
-                Some(Self::lit_from_f64(ns.into_iter().fold(f64::INFINITY, |a, b| a.min(b))))
+                Some(Self::lit_from_f64(
+                    ns.into_iter().fold(f64::INFINITY, |a, b| a.min(b)),
+                ))
             }
             "pmax" if !args.is_empty() => {
                 let ns = nums?;
-                Some(Self::lit_from_f64(ns.into_iter().fold(f64::NEG_INFINITY, |a, b| a.max(b))))
+                Some(Self::lit_from_f64(
+                    ns.into_iter().fold(f64::NEG_INFINITY, |a, b| a.max(b)),
+                ))
             }
             _ => None,
         }
@@ -593,7 +702,12 @@ impl MirSCCP {
         state
     }
 
-    fn apply_results(&self, fn_ir: &mut FnIR, lattice: &HashMap<ValueId, Lattice>, executable: &HashSet<BlockId>) -> bool {
+    fn apply_results(
+        &self,
+        fn_ir: &mut FnIR,
+        lattice: &HashMap<ValueId, Lattice>,
+        executable: &HashSet<BlockId>,
+    ) -> bool {
         let mut changed = false;
 
         for (id, state) in lattice {
@@ -607,15 +721,22 @@ impl MirSCCP {
         }
 
         for bid in 0..fn_ir.blocks.len() {
-            if !executable.contains(&bid) { continue; }
-            
+            if !executable.contains(&bid) {
+                continue;
+            }
+
             let mut new_term = None;
             {
                 let block = &fn_ir.blocks[bid];
-                if let Terminator::If { cond, then_bb, else_bb } = &block.term {
+                if let Terminator::If {
+                    cond,
+                    then_bb,
+                    else_bb,
+                } = &block.term
+                {
                     if let Some(state) = lattice.get(cond) {
                         if let Lattice::Constant(Lit::Bool(c)) = state {
-                             new_term = Some(Terminator::Goto(if *c { *then_bb } else { *else_bb }));
+                            new_term = Some(Terminator::Goto(if *c { *then_bb } else { *else_bb }));
                         }
                     }
                 }
@@ -651,7 +772,9 @@ impl MirSCCP {
                         users.entry(*idx).or_default().push(User::Block(blk.id));
                         users.entry(*val).or_default().push(User::Block(blk.id));
                     }
-                    Instr::StoreIndex2D { base, r, c, val, .. } => {
+                    Instr::StoreIndex2D {
+                        base, r, c, val, ..
+                    } => {
                         users.entry(*base).or_default().push(User::Block(blk.id));
                         users.entry(*r).or_default().push(User::Block(blk.id));
                         users.entry(*c).or_default().push(User::Block(blk.id));
@@ -725,9 +848,24 @@ mod tests {
         fn_ir.blocks[entry].term = Terminator::Goto(header);
         fn_ir.blocks[latch].term = Terminator::Goto(header);
 
-        let c0 = fn_ir.add_value(ValueKind::Const(Lit::Int(0)), Span::default(), Facts::empty(), None);
-        let c1 = fn_ir.add_value(ValueKind::Const(Lit::Int(1)), Span::default(), Facts::empty(), None);
-        let c10 = fn_ir.add_value(ValueKind::Const(Lit::Int(10)), Span::default(), Facts::empty(), None);
+        let c0 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(0)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let c1 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(1)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let c10 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(10)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
 
         let phi_i = fn_ir.add_value(
             ValueKind::Phi {
@@ -813,8 +951,18 @@ mod tests {
 
         fn_ir.blocks[entry].term = Terminator::Goto(header);
 
-        let c1000 = fn_ir.add_value(ValueKind::Const(Lit::Int(1000)), Span::default(), Facts::empty(), None);
-        let c0 = fn_ir.add_value(ValueKind::Const(Lit::Int(0)), Span::default(), Facts::empty(), None);
+        let c1000 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(1000)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let c0 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(0)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         let cond = fn_ir.add_value(
             ValueKind::Binary {
                 op: BinOp::Gt,
@@ -825,8 +973,18 @@ mod tests {
             Facts::empty(),
             None,
         );
-        let alive = fn_ir.add_value(ValueKind::Const(Lit::Str("Alive".to_string())), Span::default(), Facts::empty(), None);
-        let dead = fn_ir.add_value(ValueKind::Const(Lit::Str("Dead".to_string())), Span::default(), Facts::empty(), None);
+        let alive = fn_ir.add_value(
+            ValueKind::Const(Lit::Str("Alive".to_string())),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let dead = fn_ir.add_value(
+            ValueKind::Const(Lit::Str("Dead".to_string())),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
 
         fn_ir.blocks[header].term = Terminator::If {
             cond,
@@ -859,9 +1017,24 @@ mod tests {
         fn_ir.blocks[entry].term = Terminator::Goto(header);
         fn_ir.blocks[latch].term = Terminator::Goto(header);
 
-        let c0 = fn_ir.add_value(ValueKind::Const(Lit::Int(0)), Span::default(), Facts::empty(), None);
-        let c1 = fn_ir.add_value(ValueKind::Const(Lit::Int(1)), Span::default(), Facts::empty(), None);
-        let n = fn_ir.add_value(ValueKind::Param { index: 0 }, Span::default(), Facts::empty(), Some("n".to_string()));
+        let c0 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(0)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let c1 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(1)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let n = fn_ir.add_value(
+            ValueKind::Param { index: 0 },
+            Span::default(),
+            Facts::empty(),
+            Some("n".to_string()),
+        );
 
         let phi_i = fn_ir.add_value(
             ValueKind::Phi {
@@ -917,7 +1090,12 @@ mod tests {
         fn_ir.entry = entry;
         fn_ir.body_head = entry;
 
-        let n = fn_ir.add_value(ValueKind::Const(Lit::Int(5)), Span::default(), Facts::empty(), None);
+        let n = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(5)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         let seq = fn_ir.add_value(
             ValueKind::Call {
                 callee: "seq_along".to_string(),
@@ -928,13 +1106,21 @@ mod tests {
             Facts::empty(),
             None,
         );
-        let len = fn_ir.add_value(ValueKind::Len { base: seq }, Span::default(), Facts::empty(), None);
+        let len = fn_ir.add_value(
+            ValueKind::Len { base: seq },
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         fn_ir.blocks[entry].term = Terminator::Return(Some(len));
 
         let sccp = MirSCCP::new();
         let mut opt = fn_ir.clone();
         assert!(sccp.optimize(&mut opt));
-        assert!(matches!(opt.values[len].kind, ValueKind::Const(Lit::Int(1))));
+        assert!(matches!(
+            opt.values[len].kind,
+            ValueKind::Const(Lit::Int(1))
+        ));
     }
 
     #[test]
@@ -944,10 +1130,30 @@ mod tests {
         fn_ir.entry = entry;
         fn_ir.body_head = entry;
 
-        let c1 = fn_ir.add_value(ValueKind::Const(Lit::Int(1)), Span::default(), Facts::empty(), None);
-        let c3 = fn_ir.add_value(ValueKind::Const(Lit::Int(3)), Span::default(), Facts::empty(), None);
-        let c2 = fn_ir.add_value(ValueKind::Const(Lit::Int(2)), Span::default(), Facts::empty(), None);
-        let r = fn_ir.add_value(ValueKind::Range { start: c1, end: c3 }, Span::default(), Facts::empty(), None);
+        let c1 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(1)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let c3 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(3)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let c2 = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(2)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let r = fn_ir.add_value(
+            ValueKind::Range { start: c1, end: c3 },
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         let idx = fn_ir.add_value(
             ValueKind::Index1D {
                 base: r,
@@ -964,7 +1170,10 @@ mod tests {
         let sccp = MirSCCP::new();
         let mut opt = fn_ir.clone();
         assert!(sccp.optimize(&mut opt));
-        assert!(matches!(opt.values[idx].kind, ValueKind::Const(Lit::Int(2))));
+        assert!(matches!(
+            opt.values[idx].kind,
+            ValueKind::Const(Lit::Int(2))
+        ));
     }
 
     #[test]
@@ -974,9 +1183,24 @@ mod tests {
         fn_ir.entry = entry;
         fn_ir.body_head = entry;
 
-        let a = fn_ir.add_value(ValueKind::Const(Lit::Int(1)), Span::default(), Facts::empty(), None);
-        let b = fn_ir.add_value(ValueKind::Const(Lit::Int(2)), Span::default(), Facts::empty(), None);
-        let c = fn_ir.add_value(ValueKind::Const(Lit::Int(3)), Span::default(), Facts::empty(), None);
+        let a = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(1)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let b = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(2)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let c = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(3)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         let sum = fn_ir.add_value(
             ValueKind::Call {
                 callee: "sum".to_string(),
@@ -992,7 +1216,10 @@ mod tests {
         let sccp = MirSCCP::new();
         let mut opt = fn_ir.clone();
         assert!(sccp.optimize(&mut opt));
-        assert!(matches!(opt.values[sum].kind, ValueKind::Const(Lit::Int(6))));
+        assert!(matches!(
+            opt.values[sum].kind,
+            ValueKind::Const(Lit::Int(6))
+        ));
     }
 
     #[test]
@@ -1002,9 +1229,24 @@ mod tests {
         fn_ir.entry = entry;
         fn_ir.body_head = entry;
 
-        let a = fn_ir.add_value(ValueKind::Const(Lit::Int(1)), Span::default(), Facts::empty(), None);
-        let b = fn_ir.add_value(ValueKind::Const(Lit::Int(2)), Span::default(), Facts::empty(), None);
-        let c = fn_ir.add_value(ValueKind::Const(Lit::Int(3)), Span::default(), Facts::empty(), None);
+        let a = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(1)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let b = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(2)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let c = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(3)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         let vecv = fn_ir.add_value(
             ValueKind::Call {
                 callee: "c".to_string(),
@@ -1015,13 +1257,21 @@ mod tests {
             Facts::empty(),
             None,
         );
-        let len = fn_ir.add_value(ValueKind::Len { base: vecv }, Span::default(), Facts::empty(), None);
+        let len = fn_ir.add_value(
+            ValueKind::Len { base: vecv },
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         fn_ir.blocks[entry].term = Terminator::Return(Some(len));
 
         let sccp = MirSCCP::new();
         let mut opt = fn_ir.clone();
         assert!(sccp.optimize(&mut opt));
-        assert!(matches!(opt.values[len].kind, ValueKind::Const(Lit::Int(3))));
+        assert!(matches!(
+            opt.values[len].kind,
+            ValueKind::Const(Lit::Int(3))
+        ));
     }
 
     #[test]
@@ -1031,8 +1281,18 @@ mod tests {
         fn_ir.entry = entry;
         fn_ir.body_head = entry;
 
-        let n = fn_ir.add_value(ValueKind::Const(Lit::Int(5)), Span::default(), Facts::empty(), None);
-        let idx = fn_ir.add_value(ValueKind::Const(Lit::Int(2)), Span::default(), Facts::empty(), None);
+        let n = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(5)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
+        let idx = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(2)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         let seq = fn_ir.add_value(
             ValueKind::Call {
                 callee: "seq_len".to_string(),
@@ -1069,7 +1329,12 @@ mod tests {
         fn_ir.entry = entry;
         fn_ir.body_head = entry;
 
-        let ten = fn_ir.add_value(ValueKind::Const(Lit::Int(10)), Span::default(), Facts::empty(), None);
+        let ten = fn_ir.add_value(
+            ValueKind::Const(Lit::Int(10)),
+            Span::default(),
+            Facts::empty(),
+            None,
+        );
         let log = fn_ir.add_value(
             ValueKind::Call {
                 callee: "log10".to_string(),
@@ -1085,6 +1350,9 @@ mod tests {
         let sccp = MirSCCP::new();
         let mut opt = fn_ir.clone();
         assert!(sccp.optimize(&mut opt));
-        assert!(matches!(opt.values[log].kind, ValueKind::Const(Lit::Int(1))));
+        assert!(matches!(
+            opt.values[log].kind,
+            ValueKind::Const(Lit::Int(1))
+        ));
     }
 }

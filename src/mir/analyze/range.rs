@@ -1,6 +1,5 @@
-﻿
 use crate::mir::*;
-use crate::syntax::ast::{Lit, BinOp};
+use crate::syntax::ast::{BinOp, Lit};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -26,30 +25,52 @@ pub struct RangeInterval {
 
 impl RangeInterval {
     pub fn top() -> Self {
-        Self { lo: SymbolicBound::NegInf, hi: SymbolicBound::PosInf }
+        Self {
+            lo: SymbolicBound::NegInf,
+            hi: SymbolicBound::PosInf,
+        }
     }
 
     pub fn bottom() -> Self {
         // Technically lo > hi, but we just use special values
-        Self { lo: SymbolicBound::PosInf, hi: SymbolicBound::NegInf }
+        Self {
+            lo: SymbolicBound::PosInf,
+            hi: SymbolicBound::NegInf,
+        }
     }
 
     pub fn join(&self, other: &Self) -> Self {
-        if self == &Self::bottom() { return other.clone(); }
-        if other == &Self::bottom() { return self.clone(); }
+        if self == &Self::bottom() {
+            return other.clone();
+        }
+        if other == &Self::bottom() {
+            return self.clone();
+        }
 
         let lo = match (&self.lo, &other.lo) {
-            (SymbolicBound::Const(a), SymbolicBound::Const(b)) => SymbolicBound::Const((*a).min(*b)),
-            (SymbolicBound::LenOf(a, off1), SymbolicBound::LenOf(b, off2)) if a == b => SymbolicBound::LenOf(*a, (*off1).min(*off2)),
-            (SymbolicBound::VarPlus(a, off1), SymbolicBound::VarPlus(b, off2)) if a == b => SymbolicBound::VarPlus(*a, (*off1).min(*off2)),
+            (SymbolicBound::Const(a), SymbolicBound::Const(b)) => {
+                SymbolicBound::Const((*a).min(*b))
+            }
+            (SymbolicBound::LenOf(a, off1), SymbolicBound::LenOf(b, off2)) if a == b => {
+                SymbolicBound::LenOf(*a, (*off1).min(*off2))
+            }
+            (SymbolicBound::VarPlus(a, off1), SymbolicBound::VarPlus(b, off2)) if a == b => {
+                SymbolicBound::VarPlus(*a, (*off1).min(*off2))
+            }
             (a, b) if a == b => a.clone(),
             _ => SymbolicBound::NegInf,
         };
 
         let hi = match (&self.hi, &other.hi) {
-            (SymbolicBound::Const(a), SymbolicBound::Const(b)) => SymbolicBound::Const((*a).max(*b)),
-            (SymbolicBound::LenOf(a, off1), SymbolicBound::LenOf(b, off2)) if a == b => SymbolicBound::LenOf(*a, (*off1).max(*off2)),
-            (SymbolicBound::VarPlus(a, off1), SymbolicBound::VarPlus(b, off2)) if a == b => SymbolicBound::VarPlus(*a, (*off1).max(*off2)),
+            (SymbolicBound::Const(a), SymbolicBound::Const(b)) => {
+                SymbolicBound::Const((*a).max(*b))
+            }
+            (SymbolicBound::LenOf(a, off1), SymbolicBound::LenOf(b, off2)) if a == b => {
+                SymbolicBound::LenOf(*a, (*off1).max(*off2))
+            }
+            (SymbolicBound::VarPlus(a, off1), SymbolicBound::VarPlus(b, off2)) if a == b => {
+                SymbolicBound::VarPlus(*a, (*off1).max(*off2))
+            }
             (a, b) if a == b => a.clone(),
             _ => SymbolicBound::PosInf,
         };
@@ -84,11 +105,16 @@ pub struct RangeFacts {
 
 impl RangeFacts {
     pub fn new() -> Self {
-        Self { values: HashMap::new() }
+        Self {
+            values: HashMap::new(),
+        }
     }
 
     pub fn get(&self, vid: ValueId) -> RangeInterval {
-        self.values.get(&vid).cloned().unwrap_or(RangeInterval::top())
+        self.values
+            .get(&vid)
+            .cloned()
+            .unwrap_or(RangeInterval::top())
     }
 
     pub fn set(&mut self, vid: ValueId, interval: RangeInterval) -> bool {
@@ -122,13 +148,19 @@ pub fn analyze_ranges(fn_ir: &FnIR) -> Vec<RangeFacts> {
 
     // Init entry block
     worklist.push_back(fn_ir.entry);
-    
+
     // Seed parameters and constants
     let mut initial_facts = RangeFacts::new();
     for (id, val) in fn_ir.values.iter().enumerate() {
         match &val.kind {
             ValueKind::Const(Lit::Int(n)) => {
-                initial_facts.set(id, RangeInterval { lo: SymbolicBound::Const(*n), hi: SymbolicBound::Const(*n) });
+                initial_facts.set(
+                    id,
+                    RangeInterval {
+                        lo: SymbolicBound::Const(*n),
+                        hi: SymbolicBound::Const(*n),
+                    },
+                );
             }
             _ => {}
         }
@@ -139,7 +171,7 @@ pub fn analyze_ranges(fn_ir: &FnIR) -> Vec<RangeFacts> {
 
     while let Some(bid) = worklist.pop_front() {
         *iterations.entry(bid).or_insert(0) += 1;
-        
+
         let mut current_facts = bb_facts[bid].clone();
         transfer_block(bid, fn_ir, &mut current_facts);
 
@@ -151,7 +183,11 @@ pub fn analyze_ranges(fn_ir: &FnIR) -> Vec<RangeFacts> {
                     worklist.push_back(*target);
                 }
             }
-            Terminator::If { cond, then_bb, else_bb } => {
+            Terminator::If {
+                cond,
+                then_bb,
+                else_bb,
+            } => {
                 // Then branch: try to narrow
                 let mut then_facts = current_facts.clone();
                 narrow_facts(&mut then_facts, *cond, true, fn_ir);
@@ -199,7 +235,9 @@ pub fn transfer_instr(instr: &Instr, values: &[Value], facts: &mut RangeFacts) {
             ensure_value_range(*idx, values, facts);
             ensure_value_range(*val, values, facts);
         }
-        Instr::StoreIndex2D { base, r, c, val, .. } => {
+        Instr::StoreIndex2D {
+            base, r, c, val, ..
+        } => {
             ensure_value_range(*base, values, facts);
             ensure_value_range(*r, values, facts);
             ensure_value_range(*c, values, facts);
@@ -302,24 +340,48 @@ fn narrow_facts(facts: &mut RangeFacts, cond_id: ValueId, is_then: bool, fn_ir: 
             // i <= rhs
             (BinOp::Le, true) | (BinOp::Gt, false) => {
                 let new_hi = bound_min(&left_intv.hi, &right_intv.hi);
-                facts.set(*lhs, RangeInterval { lo: left_intv.lo.clone(), hi: new_hi });
+                facts.set(
+                    *lhs,
+                    RangeInterval {
+                        lo: left_intv.lo.clone(),
+                        hi: new_hi,
+                    },
+                );
             }
             // i < rhs  => i <= rhs - 1
             (BinOp::Lt, true) | (BinOp::Ge, false) => {
                 let rhs_hi = right_intv.hi.shift(-1);
                 let new_hi = bound_min(&left_intv.hi, &rhs_hi);
-                facts.set(*lhs, RangeInterval { lo: left_intv.lo.clone(), hi: new_hi });
+                facts.set(
+                    *lhs,
+                    RangeInterval {
+                        lo: left_intv.lo.clone(),
+                        hi: new_hi,
+                    },
+                );
             }
             // i >= rhs
             (BinOp::Ge, true) | (BinOp::Lt, false) => {
                 let new_lo = bound_max(&left_intv.lo, &right_intv.lo);
-                facts.set(*lhs, RangeInterval { lo: new_lo, hi: left_intv.hi.clone() });
+                facts.set(
+                    *lhs,
+                    RangeInterval {
+                        lo: new_lo,
+                        hi: left_intv.hi.clone(),
+                    },
+                );
             }
             // i > rhs => i >= rhs + 1
             (BinOp::Gt, true) | (BinOp::Le, false) => {
                 let rhs_lo = right_intv.lo.shift(1);
                 let new_lo = bound_max(&left_intv.lo, &rhs_lo);
-                facts.set(*lhs, RangeInterval { lo: new_lo, hi: left_intv.hi.clone() });
+                facts.set(
+                    *lhs,
+                    RangeInterval {
+                        lo: new_lo,
+                        hi: left_intv.hi.clone(),
+                    },
+                );
             }
             _ => {}
         }
@@ -330,34 +392,60 @@ fn add_bound(a: &SymbolicBound, b: &SymbolicBound, is_lo: bool) -> SymbolicBound
     match (a, b) {
         (SymbolicBound::Const(x), SymbolicBound::Const(y)) => SymbolicBound::Const(x + y),
         (SymbolicBound::LenOf(base, off), SymbolicBound::Const(c))
-        | (SymbolicBound::Const(c), SymbolicBound::LenOf(base, off)) => SymbolicBound::LenOf(*base, off + c),
+        | (SymbolicBound::Const(c), SymbolicBound::LenOf(base, off)) => {
+            SymbolicBound::LenOf(*base, off + c)
+        }
         (SymbolicBound::VarPlus(v, off), SymbolicBound::Const(c))
-        | (SymbolicBound::Const(c), SymbolicBound::VarPlus(v, off)) => SymbolicBound::VarPlus(*v, off + c),
-        _ => if is_lo { SymbolicBound::NegInf } else { SymbolicBound::PosInf },
+        | (SymbolicBound::Const(c), SymbolicBound::VarPlus(v, off)) => {
+            SymbolicBound::VarPlus(*v, off + c)
+        }
+        _ => {
+            if is_lo {
+                SymbolicBound::NegInf
+            } else {
+                SymbolicBound::PosInf
+            }
+        }
     }
 }
 
 fn sub_bound(a: &SymbolicBound, b: &SymbolicBound, is_lo: bool) -> SymbolicBound {
     match (a, b) {
         (SymbolicBound::Const(x), SymbolicBound::Const(y)) => SymbolicBound::Const(x - y),
-        (SymbolicBound::LenOf(base, off), SymbolicBound::Const(c)) => SymbolicBound::LenOf(*base, off - c),
-        (SymbolicBound::VarPlus(v, off), SymbolicBound::Const(c)) => SymbolicBound::VarPlus(*v, off - c),
+        (SymbolicBound::LenOf(base, off), SymbolicBound::Const(c)) => {
+            SymbolicBound::LenOf(*base, off - c)
+        }
+        (SymbolicBound::VarPlus(v, off), SymbolicBound::Const(c)) => {
+            SymbolicBound::VarPlus(*v, off - c)
+        }
         // (v + a) - (v + b) -> const (a - b)
         (SymbolicBound::VarPlus(v1, off1), SymbolicBound::VarPlus(v2, off2)) if v1 == v2 => {
             SymbolicBound::Const(off1 - off2)
         }
-        (SymbolicBound::LenOf(base1, off1), SymbolicBound::LenOf(base2, off2)) if base1 == base2 => {
+        (SymbolicBound::LenOf(base1, off1), SymbolicBound::LenOf(base2, off2))
+            if base1 == base2 =>
+        {
             SymbolicBound::Const(off1 - off2)
         }
-        _ => if is_lo { SymbolicBound::NegInf } else { SymbolicBound::PosInf },
+        _ => {
+            if is_lo {
+                SymbolicBound::NegInf
+            } else {
+                SymbolicBound::PosInf
+            }
+        }
     }
 }
 
 fn bound_min(current: &SymbolicBound, candidate: &SymbolicBound) -> SymbolicBound {
     match (current, candidate) {
         (SymbolicBound::Const(a), SymbolicBound::Const(b)) => SymbolicBound::Const((*a).min(*b)),
-        (SymbolicBound::LenOf(a, off1), SymbolicBound::LenOf(b, off2)) if a == b => SymbolicBound::LenOf(*a, (*off1).min(*off2)),
-        (SymbolicBound::VarPlus(a, off1), SymbolicBound::VarPlus(b, off2)) if a == b => SymbolicBound::VarPlus(*a, (*off1).min(*off2)),
+        (SymbolicBound::LenOf(a, off1), SymbolicBound::LenOf(b, off2)) if a == b => {
+            SymbolicBound::LenOf(*a, (*off1).min(*off2))
+        }
+        (SymbolicBound::VarPlus(a, off1), SymbolicBound::VarPlus(b, off2)) if a == b => {
+            SymbolicBound::VarPlus(*a, (*off1).min(*off2))
+        }
         (SymbolicBound::PosInf, b) => b.clone(),
         _ => current.clone(),
     }
@@ -366,8 +454,12 @@ fn bound_min(current: &SymbolicBound, candidate: &SymbolicBound) -> SymbolicBoun
 fn bound_max(current: &SymbolicBound, candidate: &SymbolicBound) -> SymbolicBound {
     match (current, candidate) {
         (SymbolicBound::Const(a), SymbolicBound::Const(b)) => SymbolicBound::Const((*a).max(*b)),
-        (SymbolicBound::LenOf(a, off1), SymbolicBound::LenOf(b, off2)) if a == b => SymbolicBound::LenOf(*a, (*off1).max(*off2)),
-        (SymbolicBound::VarPlus(a, off1), SymbolicBound::VarPlus(b, off2)) if a == b => SymbolicBound::VarPlus(*a, (*off1).max(*off2)),
+        (SymbolicBound::LenOf(a, off1), SymbolicBound::LenOf(b, off2)) if a == b => {
+            SymbolicBound::LenOf(*a, (*off1).max(*off2))
+        }
+        (SymbolicBound::VarPlus(a, off1), SymbolicBound::VarPlus(b, off2)) if a == b => {
+            SymbolicBound::VarPlus(*a, (*off1).max(*off2))
+        }
         (SymbolicBound::NegInf, b) => b.clone(),
         _ => current.clone(),
     }

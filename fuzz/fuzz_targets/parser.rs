@@ -10,4 +10,3 @@ fuzz_target!(|data: &[u8]| {
     let mut parser = Parser::new(src);
     let _ = parser.parse_program();
 });
-

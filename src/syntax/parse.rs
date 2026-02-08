@@ -1,9 +1,9 @@
-﻿use crate::error::{RR, RRCode, Stage, RRCtx, RRException};
-use crate::{bail, bail_at};
-use crate::syntax::token::*;
-use crate::syntax::lex::Lexer;
+use crate::error::{RR, RRCode, RRCtx, RRException, Stage};
 use crate::syntax::ast::*;
+use crate::syntax::lex::Lexer;
+use crate::syntax::token::*;
 use crate::utils::Span;
+use crate::{bail, bail_at};
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -32,7 +32,11 @@ impl<'a> Parser<'a> {
         let mut lexer = Lexer::new(input);
         let current = lexer.next_token();
         let peek = lexer.next_token();
-        Self { lexer, current, peek }
+        Self {
+            lexer,
+            current,
+            peek,
+        }
     }
 
     fn advance(&mut self) {
@@ -45,7 +49,15 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(())
         } else {
-            bail_at!(self.current.span, "RR.ParseError", RRCode::E0001, Stage::Parse, "Expected {:?}, got {:?}", kind, self.current.kind);
+            bail_at!(
+                self.current.span,
+                "RR.ParseError",
+                RRCode::E0001,
+                Stage::Parse,
+                "Expected {:?}, got {:?}",
+                kind,
+                self.current.kind
+            );
         }
     }
 
@@ -58,7 +70,9 @@ impl<'a> Parser<'a> {
             TokenKind::Lt | TokenKind::Le | TokenKind::Gt | TokenKind::Ge => Precedence::Comparison,
             TokenKind::DotDot => Precedence::Range,
             TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
-            TokenKind::Star | TokenKind::Slash | TokenKind::Percent | TokenKind::MatMul => Precedence::Product,
+            TokenKind::Star | TokenKind::Slash | TokenKind::Percent | TokenKind::MatMul => {
+                Precedence::Product
+            }
             TokenKind::LParen | TokenKind::LBracket | TokenKind::Dot => Precedence::Call,
             TokenKind::Question => Precedence::Try,
             _ => Precedence::Lowest,
@@ -98,8 +112,10 @@ impl<'a> Parser<'a> {
     }
 
     fn can_end_stmt_here(&self) -> bool {
-        matches!(self.current.kind, TokenKind::RBrace | TokenKind::EOF | TokenKind::Else)
-            || Self::is_stmt_start(&self.current.kind)
+        matches!(
+            self.current.kind,
+            TokenKind::RBrace | TokenKind::EOF | TokenKind::Else
+        ) || Self::is_stmt_start(&self.current.kind)
     }
 
     fn consume_stmt_end(&mut self, fallback: Span) -> RR<Span> {
@@ -118,11 +134,15 @@ impl<'a> Parser<'a> {
             self.advance();
             return Ok(semi);
         }
-        if matches!(self.current.kind, TokenKind::RBrace | TokenKind::EOF | TokenKind::Else) {
+        if matches!(
+            self.current.kind,
+            TokenKind::RBrace | TokenKind::EOF | TokenKind::Else
+        ) {
             return Ok(fallback);
         }
         if Self::is_stmt_start(&self.current.kind) {
-            let same_line = fallback.end_line > 0 && self.current.span.start_line == fallback.end_line;
+            let same_line =
+                fallback.end_line > 0 && self.current.span.start_line == fallback.end_line;
             if same_line {
                 bail_at!(
                     self.current.span,
@@ -174,12 +194,15 @@ impl<'a> Parser<'a> {
                         format!("{}", msg),
                     )
                     .at(self.current.span)
-                    .push_frame("Parser.parse_program/1", Some(self.current.span))
+                    .push_frame("Parser.parse_program/1", Some(self.current.span)),
                 );
                 self.recover_stmt_boundary();
                 continue;
             }
-            match self.parse_stmt().ctx("Parser.parse_stmt/1", Some(self.current.span)) {
+            match self
+                .parse_stmt()
+                .ctx("Parser.parse_stmt/1", Some(self.current.span))
+            {
                 Ok(stmt) => stmts.push(stmt),
                 Err(e) => {
                     errors.push(e);
@@ -234,10 +257,16 @@ impl<'a> Parser<'a> {
         // let ident = expr ;
         let start = self.current.span;
         self.advance(); // let
-        
+
         let name = match &self.current.kind {
             TokenKind::Ident(n) => n.clone(),
-            _ => bail_at!(self.current.span, "RR.ParseError", RRCode::E0001, Stage::Parse, "Expected identifier after let"),
+            _ => bail_at!(
+                self.current.span,
+                "RR.ParseError",
+                RRCode::E0001,
+                Stage::Parse,
+                "Expected identifier after let"
+            ),
         };
         self.advance();
 
@@ -246,7 +275,10 @@ impl<'a> Parser<'a> {
         let end = self.consume_stmt_end(init.span)?;
 
         Ok(Stmt {
-            kind: StmtKind::Let { name, init: Some(init) },
+            kind: StmtKind::Let {
+                name,
+                init: Some(init),
+            },
             span: start.merge(end),
         })
     }
@@ -256,7 +288,12 @@ impl<'a> Parser<'a> {
         self.advance(); // fn
         let name = match &self.current.kind {
             TokenKind::Ident(n) => n.clone(),
-            _ => bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "Expected identifier for fn"),
+            _ => bail!(
+                "RR.ParseError",
+                RRCode::E0001,
+                Stage::Parse,
+                "Expected identifier for fn"
+            ),
         };
         self.advance();
 
@@ -266,7 +303,12 @@ impl<'a> Parser<'a> {
             loop {
                 match &self.current.kind {
                     TokenKind::Ident(p) => params.push(p.clone()),
-                    _ => bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "Expected param name"),
+                    _ => bail!(
+                        "RR.ParseError",
+                        RRCode::E0001,
+                        Stage::Parse,
+                        "Expected param name"
+                    ),
                 }
                 self.advance();
                 if self.current.kind == TokenKind::Comma {
@@ -279,9 +321,13 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::RParen)?;
 
         let body = self.parse_block()?;
-        
+
         Ok(Stmt {
-            kind: StmtKind::FnDecl { name, params, body: body.clone() },
+            kind: StmtKind::FnDecl {
+                name,
+                params,
+                body: body.clone(),
+            },
             span: start.merge(body.span),
         })
     }
@@ -317,12 +363,15 @@ impl<'a> Parser<'a> {
                     "Expected RBrace, got EOF".to_string(),
                 )
                 .at(self.current.span)
-                .push_frame("Parser.parse_block/1", Some(self.current.span))
+                .push_frame("Parser.parse_block/1", Some(self.current.span)),
             );
         }
 
         if errors.is_empty() {
-            Ok(Block { stmts, span: start.merge(end) })
+            Ok(Block {
+                stmts,
+                span: start.merge(end),
+            })
         } else if errors.len() == 1 {
             Err(errors.remove(0))
         } else {
@@ -349,10 +398,14 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        
+
         let end_span = else_blk.as_ref().map(|b| b.span).unwrap_or(then_blk.span);
         Ok(Stmt {
-            kind: StmtKind::If { cond, then_blk, else_blk },
+            kind: StmtKind::If {
+                cond,
+                then_blk,
+                else_blk,
+            },
             span: start.merge(end_span),
         })
     }
@@ -365,7 +418,10 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::RParen)?;
         let body = self.parse_block()?;
         Ok(Stmt {
-            kind: StmtKind::While { cond, body: body.clone() },
+            kind: StmtKind::While {
+                cond,
+                body: body.clone(),
+            },
             span: start.merge(body.span),
         })
     }
@@ -376,7 +432,12 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LParen)?;
         let var = match &self.current.kind {
             TokenKind::Ident(n) => n.clone(),
-            _ => bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "Expected identifier in for"),
+            _ => bail!(
+                "RR.ParseError",
+                RRCode::E0001,
+                Stage::Parse,
+                "Expected identifier in for"
+            ),
         };
         self.advance();
         self.expect(TokenKind::In)?;
@@ -384,7 +445,11 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::RParen)?;
         let body = self.parse_block()?;
         Ok(Stmt {
-            kind: StmtKind::For { var, iter, body: body.clone() },
+            kind: StmtKind::For {
+                var,
+                iter,
+                body: body.clone(),
+            },
             span: start.merge(body.span),
         })
     }
@@ -394,7 +459,10 @@ impl<'a> Parser<'a> {
         self.advance(); // return
         // `return` without value is allowed only at explicit/structural statement end.
         // Using `is_stmt_start` here breaks `return x + 1` when semicolons are optional.
-        let value = if matches!(self.current.kind, TokenKind::Semicolon | TokenKind::RBrace | TokenKind::EOF | TokenKind::Else) {
+        let value = if matches!(
+            self.current.kind,
+            TokenKind::Semicolon | TokenKind::RBrace | TokenKind::EOF | TokenKind::Else
+        ) {
             None
         } else {
             Some(self.parse_expr(Precedence::Lowest)?)
@@ -430,38 +498,55 @@ impl<'a> Parser<'a> {
     fn parse_import_stmt(&mut self) -> RR<Stmt> {
         let start = self.current.span;
         self.advance(); // import
-        
+
         let path = match &self.current.kind {
             TokenKind::String(s) => s.clone(),
-            _ => bail_at!(self.current.span, "RR.ParseError", RRCode::E0001, Stage::Parse, "Expected string after import"),
+            _ => bail_at!(
+                self.current.span,
+                "RR.ParseError",
+                RRCode::E0001,
+                Stage::Parse,
+                "Expected string after import"
+            ),
         };
         self.advance();
-        
+
         // Optional semicolon?
         if self.current.kind == TokenKind::Semicolon {
-             self.advance();
+            self.advance();
         }
-        
+
         Ok(Stmt {
             kind: StmtKind::Import(path),
             span: start.merge(self.current.span),
         })
     }
-    
+
     fn parse_export_modifier(&mut self) -> RR<Stmt> {
         let start = self.current.span;
         self.advance(); // export
-        
+
         // Expect fn declaration
         let stmt = self.parse_fn_decl()?;
-        
+
         if let StmtKind::FnDecl { name, params, body } = stmt.kind {
-             Ok(Stmt {
-                 kind: StmtKind::Export(FnDecl { name, params, body, public: true }),
-                 span: start.merge(stmt.span)
-             })
+            Ok(Stmt {
+                kind: StmtKind::Export(FnDecl {
+                    name,
+                    params,
+                    body,
+                    public: true,
+                }),
+                span: start.merge(stmt.span),
+            })
         } else {
-             bail_at!(start, "RR.ParseError", RRCode::E0001, Stage::Parse, "Expected function after export");
+            bail_at!(
+                start,
+                "RR.ParseError",
+                RRCode::E0001,
+                Stage::Parse,
+                "Expected function after export"
+            );
         }
     }
 
@@ -469,17 +554,20 @@ impl<'a> Parser<'a> {
         // Can be Assign (x = ...) or ExprStmt (x; or call(x);)
         let start = self.current.span;
         let expr = self.parse_expr(Precedence::Lowest)?;
-        
+
         if self.current.kind == TokenKind::Assign {
             // It's an assignment
             self.advance();
             let value = self.parse_expr(Precedence::Lowest)?;
             let end = self.consume_stmt_end(value.span)?;
-            
+
             // Convert expr to LValue
             let lvalue = self.expr_to_lvalue(expr)?;
             Ok(Stmt {
-                kind: StmtKind::Assign { target: lvalue, value },
+                kind: StmtKind::Assign {
+                    target: lvalue,
+                    value,
+                },
                 span: start.merge(end),
             })
         } else {
@@ -493,17 +581,34 @@ impl<'a> Parser<'a> {
 
     fn expr_to_lvalue(&self, expr: Expr) -> RR<LValue> {
         match expr.kind {
-            ExprKind::Name(n) => Ok(LValue { kind: LValueKind::Name(n), span: expr.span }),
-            ExprKind::Index { base, idx } => Ok(LValue { kind: LValueKind::Index { base: *base, idx }, span: expr.span }),
-            ExprKind::Field { base, name } => Ok(LValue { kind: LValueKind::Field { base: *base, name }, span: expr.span }),
-            _ => bail!("RR.SemanticError", RRCode::E1002, Stage::Parse, "Invalid lvalue: {:?}", expr),
+            ExprKind::Name(n) => Ok(LValue {
+                kind: LValueKind::Name(n),
+                span: expr.span,
+            }),
+            ExprKind::Index { base, idx } => Ok(LValue {
+                kind: LValueKind::Index { base: *base, idx },
+                span: expr.span,
+            }),
+            ExprKind::Field { base, name } => Ok(LValue {
+                kind: LValueKind::Field { base: *base, name },
+                span: expr.span,
+            }),
+            _ => bail!(
+                "RR.SemanticError",
+                RRCode::E1002,
+                Stage::Parse,
+                "Invalid lvalue: {:?}",
+                expr
+            ),
         }
     }
 
     fn parse_expr(&mut self, precedence: Precedence) -> RR<Expr> {
         let mut left = self.parse_prefix()?;
 
-        while self.current.kind != TokenKind::Semicolon && precedence < Self::token_precedence(&self.current.kind) {
+        while self.current.kind != TokenKind::Semicolon
+            && precedence < Self::token_precedence(&self.current.kind)
+        {
             left = self.parse_infix(left)?;
         }
 
@@ -526,45 +631,93 @@ impl<'a> Parser<'a> {
             TokenKind::Ident(name) => {
                 let name = name.clone();
                 self.advance();
-                Ok(Expr { kind: ExprKind::Name(name), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Name(name),
+                    span: start,
+                })
             }
             TokenKind::Int(i) => {
                 let i = *i;
                 self.advance();
-                Ok(Expr { kind: ExprKind::Lit(Lit::Int(i)), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Lit(Lit::Int(i)),
+                    span: start,
+                })
             }
             TokenKind::Float(f) => {
                 let f = *f;
                 self.advance();
-                Ok(Expr { kind: ExprKind::Lit(Lit::Float(f)), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Lit(Lit::Float(f)),
+                    span: start,
+                })
             }
             TokenKind::String(s) => {
                 let s = s.clone();
                 self.advance();
-                Ok(Expr { kind: ExprKind::Lit(Lit::Str(s)), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Lit(Lit::Str(s)),
+                    span: start,
+                })
             }
-            TokenKind::True => { self.advance(); Ok(Expr { kind: ExprKind::Lit(Lit::Bool(true)), span: start }) }
-            TokenKind::False => { self.advance(); Ok(Expr { kind: ExprKind::Lit(Lit::Bool(false)), span: start }) }
-            TokenKind::Null => { self.advance(); Ok(Expr { kind: ExprKind::Lit(Lit::Null), span: start }) }
-            TokenKind::Na => { self.advance(); Ok(Expr { kind: ExprKind::Lit(Lit::Na), span: start }) }
+            TokenKind::True => {
+                self.advance();
+                Ok(Expr {
+                    kind: ExprKind::Lit(Lit::Bool(true)),
+                    span: start,
+                })
+            }
+            TokenKind::False => {
+                self.advance();
+                Ok(Expr {
+                    kind: ExprKind::Lit(Lit::Bool(false)),
+                    span: start,
+                })
+            }
+            TokenKind::Null => {
+                self.advance();
+                Ok(Expr {
+                    kind: ExprKind::Lit(Lit::Null),
+                    span: start,
+                })
+            }
+            TokenKind::Na => {
+                self.advance();
+                Ok(Expr {
+                    kind: ExprKind::Lit(Lit::Na),
+                    span: start,
+                })
+            }
             TokenKind::Fn => self.parse_lambda_expr(),
-            
+
             TokenKind::Match => self.parse_match(),
             TokenKind::At => {
                 self.advance();
                 let name = match &self.current.kind {
                     TokenKind::Ident(n) => n.clone(),
-                    _ => bail_at!(self.current.span, "RR.ParseError", RRCode::E0001, Stage::Parse, "Expected identifier after @"),
+                    _ => bail_at!(
+                        self.current.span,
+                        "RR.ParseError",
+                        RRCode::E0001,
+                        Stage::Parse,
+                        "Expected identifier after @"
+                    ),
                 };
                 self.advance();
-                Ok(Expr { kind: ExprKind::Column(name), span: start.merge(self.current.span) })
-            },
+                Ok(Expr {
+                    kind: ExprKind::Column(name),
+                    span: start.merge(self.current.span),
+                })
+            }
             TokenKind::Caret => {
                 self.advance();
                 let val = self.parse_expr(Precedence::Prefix)?;
                 let end = val.span;
-                Ok(Expr { kind: ExprKind::Unquote(Box::new(val)), span: start.merge(end) })
-            },
+                Ok(Expr {
+                    kind: ExprKind::Unquote(Box::new(val)),
+                    span: start.merge(end),
+                })
+            }
             TokenKind::LParen => {
                 self.advance();
                 let expr = self.parse_expr(Precedence::Lowest)?;
@@ -587,7 +740,10 @@ impl<'a> Parser<'a> {
                 }
                 let end = self.current.span;
                 self.expect(TokenKind::RBracket)?;
-                Ok(Expr { kind: ExprKind::VectorLit(elems), span: start.merge(end) })
+                Ok(Expr {
+                    kind: ExprKind::VectorLit(elems),
+                    span: start.merge(end),
+                })
             }
             TokenKind::LBrace => {
                 // Record Decl: { a: 1, b: 2 }
@@ -597,13 +753,18 @@ impl<'a> Parser<'a> {
                     loop {
                         let name = match &self.current.kind {
                             TokenKind::Ident(n) => n.clone(),
-                            _ => bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "Expected field name in record"),
+                            _ => bail!(
+                                "RR.ParseError",
+                                RRCode::E0001,
+                                Stage::Parse,
+                                "Expected field name in record"
+                            ),
                         };
                         self.advance();
                         self.expect(TokenKind::Colon)?;
                         let val = self.parse_expr(Precedence::Lowest)?;
                         fields.push((name, val));
-                        
+
                         if self.current.kind == TokenKind::Comma {
                             self.advance();
                         } else {
@@ -613,19 +774,40 @@ impl<'a> Parser<'a> {
                 }
                 let end = self.current.span;
                 self.expect(TokenKind::RBrace)?;
-                Ok(Expr { kind: ExprKind::RecordLit(fields), span: start.merge(end) })
+                Ok(Expr {
+                    kind: ExprKind::RecordLit(fields),
+                    span: start.merge(end),
+                })
             }
             TokenKind::Minus => {
                 self.advance();
                 let rhs = self.parse_expr(Precedence::Prefix)?;
-                Ok(Expr { kind: ExprKind::Unary { op: UnaryOp::Neg, rhs: Box::new(rhs) }, span: start }) 
+                Ok(Expr {
+                    kind: ExprKind::Unary {
+                        op: UnaryOp::Neg,
+                        rhs: Box::new(rhs),
+                    },
+                    span: start,
+                })
             }
             TokenKind::Bang => {
                 self.advance();
                 let rhs = self.parse_expr(Precedence::Prefix)?;
-                Ok(Expr { kind: ExprKind::Unary { op: UnaryOp::Not, rhs: Box::new(rhs) }, span: start })
+                Ok(Expr {
+                    kind: ExprKind::Unary {
+                        op: UnaryOp::Not,
+                        rhs: Box::new(rhs),
+                    },
+                    span: start,
+                })
             }
-            _ => bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "Unexpected token in prefix: {:?}", self.current.kind),
+            _ => bail!(
+                "RR.ParseError",
+                RRCode::E0001,
+                Stage::Parse,
+                "Unexpected token in prefix: {:?}",
+                self.current.kind
+            ),
         }
     }
 
@@ -638,7 +820,12 @@ impl<'a> Parser<'a> {
             loop {
                 match &self.current.kind {
                     TokenKind::Ident(p) => params.push(p.clone()),
-                    _ => bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "Expected parameter name in lambda"),
+                    _ => bail!(
+                        "RR.ParseError",
+                        RRCode::E0001,
+                        Stage::Parse,
+                        "Expected parameter name in lambda"
+                    ),
                 }
                 self.advance();
                 if self.current.kind == TokenKind::Comma {
@@ -651,7 +838,10 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::RParen)?;
         let body = self.parse_block()?;
         Ok(Expr {
-            kind: ExprKind::Lambda { params, body: body.clone() },
+            kind: ExprKind::Lambda {
+                params,
+                body: body.clone(),
+            },
             span: start.merge(body.span),
         })
     }
@@ -659,7 +849,7 @@ impl<'a> Parser<'a> {
     fn parse_infix(&mut self, left: Expr) -> RR<Expr> {
         let start = left.span;
         let kind = self.current.kind.clone();
-        
+
         match kind {
             TokenKind::LParen => {
                 // Call
@@ -676,7 +866,10 @@ impl<'a> Parser<'a> {
                                 let value = self.parse_expr(Precedence::Lowest)?;
                                 let arg_span = arg_start.merge(value.span);
                                 args.push(Expr {
-                                    kind: ExprKind::NamedArg { name: arg_name, value: Box::new(value) },
+                                    kind: ExprKind::NamedArg {
+                                        name: arg_name,
+                                        value: Box::new(value),
+                                    },
                                     span: arg_span,
                                 });
                             } else {
@@ -694,7 +887,13 @@ impl<'a> Parser<'a> {
                 }
                 let end = self.current.span;
                 self.expect(TokenKind::RParen)?;
-                Ok(Expr { kind: ExprKind::Call { callee: Box::new(left), args }, span: start.merge(end) })
+                Ok(Expr {
+                    kind: ExprKind::Call {
+                        callee: Box::new(left),
+                        args,
+                    },
+                    span: start.merge(end),
+                })
             }
             TokenKind::LBracket => {
                 // Index
@@ -710,7 +909,13 @@ impl<'a> Parser<'a> {
                 }
                 let end = self.current.span;
                 self.expect(TokenKind::RBracket)?;
-                Ok(Expr { kind: ExprKind::Index { base: Box::new(left), idx }, span: start.merge(end) })
+                Ok(Expr {
+                    kind: ExprKind::Index {
+                        base: Box::new(left),
+                        idx,
+                    },
+                    span: start.merge(end),
+                })
             }
             TokenKind::Dot => {
                 self.advance(); // consume '.'
@@ -726,7 +931,10 @@ impl<'a> Parser<'a> {
                 };
                 self.advance();
                 Ok(Expr {
-                    kind: ExprKind::Field { base: Box::new(left), name },
+                    kind: ExprKind::Field {
+                        base: Box::new(left),
+                        name,
+                    },
                     span: start.merge(end),
                 })
             }
@@ -734,46 +942,96 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let right = self.parse_expr(Precedence::Range)?;
                 let end = right.span;
-                Ok(Expr { kind: ExprKind::Range { a: Box::new(left), b: Box::new(right) }, span: start.merge(end) }) 
+                Ok(Expr {
+                    kind: ExprKind::Range {
+                        a: Box::new(left),
+                        b: Box::new(right),
+                    },
+                    span: start.merge(end),
+                })
             }
             TokenKind::Pipe => {
                 self.advance();
                 let rhs = self.parse_expr(Precedence::Pipe)?;
                 if let ExprKind::Call { .. } = rhs.kind {
-                     let end = rhs.span;
-                     Ok(Expr { kind: ExprKind::Pipe { lhs: Box::new(left), rhs_call: Box::new(rhs) }, span: start.merge(end) })
+                    let end = rhs.span;
+                    Ok(Expr {
+                        kind: ExprKind::Pipe {
+                            lhs: Box::new(left),
+                            rhs_call: Box::new(rhs),
+                        },
+                        span: start.merge(end),
+                    })
                 } else if let ExprKind::Try { .. } = rhs.kind {
-                     // Allow pipe to try? x |> f?
-                     // If rhs is Try(Call(..)), valid?
-                     // The parser parsed rhs as Try(Call).
-                     let end = rhs.span;
-                     Ok(Expr { kind: ExprKind::Pipe { lhs: Box::new(left), rhs_call: Box::new(rhs) }, span: start.merge(end) })
+                    // Allow pipe to try? x |> f?
+                    // If rhs is Try(Call(..)), valid?
+                    // The parser parsed rhs as Try(Call).
+                    let end = rhs.span;
+                    Ok(Expr {
+                        kind: ExprKind::Pipe {
+                            lhs: Box::new(left),
+                            rhs_call: Box::new(rhs),
+                        },
+                        span: start.merge(end),
+                    })
                 } else {
-                    bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "RHS of |> must be a function call (got {:?})", rhs.kind);
+                    bail!(
+                        "RR.ParseError",
+                        RRCode::E0001,
+                        Stage::Parse,
+                        "RHS of |> must be a function call (got {:?})",
+                        rhs.kind
+                    );
                 }
             }
             TokenKind::Question => {
                 // Postfix Try ?
                 self.advance();
                 let end = self.current.span; // Approx
-                Ok(Expr { kind: ExprKind::Try { expr: Box::new(left) }, span: start.merge(end) })
+                Ok(Expr {
+                    kind: ExprKind::Try {
+                        expr: Box::new(left),
+                    },
+                    span: start.merge(end),
+                })
             }
             _ => {
                 // Binary Op
                 let op = match kind {
-                    TokenKind::Plus => BinOp::Add, TokenKind::Minus => BinOp::Sub,
-                    TokenKind::Star => BinOp::Mul, TokenKind::Slash => BinOp::Div, TokenKind::Percent => BinOp::Mod, TokenKind::MatMul => BinOp::MatMul,
-                    TokenKind::Eq => BinOp::Eq, TokenKind::Ne => BinOp::Ne,
-                    TokenKind::Lt => BinOp::Lt, TokenKind::Le => BinOp::Le,
-                    TokenKind::Gt => BinOp::Gt, TokenKind::Ge => BinOp::Ge,
-                    TokenKind::And => BinOp::And, TokenKind::Or => BinOp::Or,
-                    _ => bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "Unknown infix op: {:?}", kind),
+                    TokenKind::Plus => BinOp::Add,
+                    TokenKind::Minus => BinOp::Sub,
+                    TokenKind::Star => BinOp::Mul,
+                    TokenKind::Slash => BinOp::Div,
+                    TokenKind::Percent => BinOp::Mod,
+                    TokenKind::MatMul => BinOp::MatMul,
+                    TokenKind::Eq => BinOp::Eq,
+                    TokenKind::Ne => BinOp::Ne,
+                    TokenKind::Lt => BinOp::Lt,
+                    TokenKind::Le => BinOp::Le,
+                    TokenKind::Gt => BinOp::Gt,
+                    TokenKind::Ge => BinOp::Ge,
+                    TokenKind::And => BinOp::And,
+                    TokenKind::Or => BinOp::Or,
+                    _ => bail!(
+                        "RR.ParseError",
+                        RRCode::E0001,
+                        Stage::Parse,
+                        "Unknown infix op: {:?}",
+                        kind
+                    ),
                 };
                 let prec = Self::token_precedence(&kind);
                 self.advance();
                 let right = self.parse_expr(prec)?;
                 let end = right.span;
-                Ok(Expr { kind: ExprKind::Binary { op, lhs: Box::new(left), rhs: Box::new(right) }, span: start.merge(end) })
+                Ok(Expr {
+                    kind: ExprKind::Binary {
+                        op,
+                        lhs: Box::new(left),
+                        rhs: Box::new(right),
+                    },
+                    span: start.merge(end),
+                })
             }
         }
     }
@@ -785,20 +1043,26 @@ impl<'a> Parser<'a> {
         let scrutinee = self.parse_expr(Precedence::Lowest)?;
         self.expect(TokenKind::RParen)?;
         self.expect(TokenKind::LBrace)?;
-        
+
         let mut arms = Vec::new();
         while self.current.kind != TokenKind::RBrace && self.current.kind != TokenKind::EOF {
             arms.push(self.parse_match_arm()?);
         }
         let end = self.current.span;
         self.expect(TokenKind::RBrace)?;
-        
-        Ok(Expr { kind: ExprKind::Match { scrutinee: Box::new(scrutinee), arms }, span: start.merge(end) })
+
+        Ok(Expr {
+            kind: ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            span: start.merge(end),
+        })
     }
 
     fn parse_match_arm(&mut self) -> RR<MatchArm> {
         let pat = self.parse_pattern()?;
-        
+
         let guard = if self.current.kind == TokenKind::If {
             self.advance();
             Some(Box::new(self.parse_expr(Precedence::Lowest)?))
@@ -807,18 +1071,23 @@ impl<'a> Parser<'a> {
         };
 
         self.expect(TokenKind::Arrow)?;
-        
+
         let body = self.parse_expr(Precedence::Lowest)?;
-        
+
         // Allow a trailing comma between match arms.
         if self.current.kind == TokenKind::Comma {
             self.advance();
         }
-        
+
         let span = pat.span();
-        Ok(MatchArm { pat, guard, body: Box::new(body), span })
+        Ok(MatchArm {
+            pat,
+            guard,
+            body: Box::new(body),
+            span,
+        })
     }
-    
+
     fn parse_pattern(&mut self) -> RR<Pattern> {
         let start = self.current.span;
         let kind = match &self.current.kind {
@@ -831,19 +1100,43 @@ impl<'a> Parser<'a> {
                     PatternKind::Bind(name)
                 }
             }
-            TokenKind::Int(i) => { let l = Lit::Int(*i); self.advance(); PatternKind::Lit(l) }
-            TokenKind::Float(f) => { let l = Lit::Float(*f); self.advance(); PatternKind::Lit(l) }
-            TokenKind::String(s) => { let l = Lit::Str(s.clone()); self.advance(); PatternKind::Lit(l) }
-            TokenKind::True => { self.advance(); PatternKind::Lit(Lit::Bool(true)) }
-            TokenKind::False => { self.advance(); PatternKind::Lit(Lit::Bool(false)) }
-            TokenKind::Na => { self.advance(); PatternKind::Lit(Lit::Na) }
-            TokenKind::Null => { self.advance(); PatternKind::Lit(Lit::Null) }
-            
+            TokenKind::Int(i) => {
+                let l = Lit::Int(*i);
+                self.advance();
+                PatternKind::Lit(l)
+            }
+            TokenKind::Float(f) => {
+                let l = Lit::Float(*f);
+                self.advance();
+                PatternKind::Lit(l)
+            }
+            TokenKind::String(s) => {
+                let l = Lit::Str(s.clone());
+                self.advance();
+                PatternKind::Lit(l)
+            }
+            TokenKind::True => {
+                self.advance();
+                PatternKind::Lit(Lit::Bool(true))
+            }
+            TokenKind::False => {
+                self.advance();
+                PatternKind::Lit(Lit::Bool(false))
+            }
+            TokenKind::Na => {
+                self.advance();
+                PatternKind::Lit(Lit::Na)
+            }
+            TokenKind::Null => {
+                self.advance();
+                PatternKind::Lit(Lit::Null)
+            }
+
             TokenKind::LBracket => {
                 self.advance();
                 let mut items = Vec::new();
                 let mut rest = None;
-                
+
                 if self.current.kind != TokenKind::RBracket {
                     loop {
                         if self.current.kind == TokenKind::DotDot {
@@ -853,18 +1146,24 @@ impl<'a> Parser<'a> {
                                 self.advance();
                             }
                             // Rest must be last, consume comma if present
-                             if self.current.kind == TokenKind::Comma {
+                            if self.current.kind == TokenKind::Comma {
                                 self.advance();
                             }
                             // Expect end
                             if self.current.kind != TokenKind::RBracket {
-                               bail_at!(self.current.span, "RR.ParseError", RRCode::E0001, Stage::Parse, "Spread .. must be last in pattern");
+                                bail_at!(
+                                    self.current.span,
+                                    "RR.ParseError",
+                                    RRCode::E0001,
+                                    Stage::Parse,
+                                    "Spread .. must be last in pattern"
+                                );
                             }
-                            break; 
+                            break;
                         } else {
                             items.push(self.parse_pattern()?);
                         }
-                        
+
                         if self.current.kind == TokenKind::Comma {
                             self.advance();
                         } else {
@@ -913,7 +1212,12 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RBrace)?;
                 PatternKind::Record { fields }
             }
-            _ => bail!("RR.ParseError", RRCode::E0001, Stage::Parse, "Expected pattern"),
+            _ => bail!(
+                "RR.ParseError",
+                RRCode::E0001,
+                Stage::Parse,
+                "Expected pattern"
+            ),
         };
         // Pattern span currently uses the start token span.
         Ok(Pattern { kind, span: start })

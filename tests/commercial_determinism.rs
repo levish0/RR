@@ -61,11 +61,6 @@ main();
 
         let a = fs::read(&out_a).expect("failed to read output A");
         let b = fs::read(&out_b).expect("failed to read output B");
-        assert_eq!(
-            a, b,
-            "non-deterministic codegen detected for {}",
-            level
-        );
+        assert_eq!(a, b, "non-deterministic codegen detected for {}", level);
     }
 }
-

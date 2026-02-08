@@ -1,6 +1,5 @@
-﻿
-use crate::mir::*;
 use crate::mir::opt::loop_analysis::LoopAnalyzer;
+use crate::mir::*;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -43,7 +42,13 @@ impl<'a> Structurizer<'a> {
         let loop_headers = compute_loop_headers(fn_ir, &reachable);
         let postdoms = compute_postdoms(fn_ir, &reachable);
         let postdom_depth = compute_postdom_depth(&postdoms, &reachable);
-        Self { fn_ir, loop_headers, postdoms, postdom_depth, reachable }
+        Self {
+            fn_ir,
+            loop_headers,
+            postdoms,
+            postdom_depth,
+            reachable,
+        }
     }
 
     pub fn build(&self) -> StructuredBlock {
@@ -98,7 +103,11 @@ impl<'a> Structurizer<'a> {
             }
 
             match &blk.term {
-                Terminator::If { cond, then_bb, else_bb } => {
+                Terminator::If {
+                    cond,
+                    then_bb,
+                    else_bb,
+                } => {
                     let join = self.find_join(*then_bb, *else_bb);
 
                     let join_ok = match (&loop_ctx, join) {
@@ -112,8 +121,10 @@ impl<'a> Structurizer<'a> {
 
                     let mut visited_then = visited.clone();
                     let mut visited_else = visited.clone();
-                    let then_body = self.build_sequence(*then_bb, &mut visited_then, loop_ctx.clone(), stop_at);
-                    let else_body = self.build_sequence(*else_bb, &mut visited_else, loop_ctx.clone(), stop_at);
+                    let then_body =
+                        self.build_sequence(*then_bb, &mut visited_then, loop_ctx.clone(), stop_at);
+                    let else_body =
+                        self.build_sequence(*else_bb, &mut visited_else, loop_ctx.clone(), stop_at);
                     visited.extend(visited_then);
                     visited.extend(visited_else);
 
@@ -159,17 +170,32 @@ impl<'a> Structurizer<'a> {
         let blk = &self.fn_ir.blocks[header];
 
         let (cond, then_bb, else_bb) = match &blk.term {
-            Terminator::If { cond, then_bb, else_bb } => (*cond, *then_bb, *else_bb),
+            Terminator::If {
+                cond,
+                then_bb,
+                else_bb,
+            } => (*cond, *then_bb, *else_bb),
             _ => {
                 return (StructuredBlock::BasicBlock(header), None);
             }
         };
 
-        let body_entry = if body_set.contains(&then_bb) { then_bb } else { else_bb };
-        let exit = if body_entry == then_bb { else_bb } else { then_bb };
+        let body_entry = if body_set.contains(&then_bb) {
+            then_bb
+        } else {
+            else_bb
+        };
+        let exit = if body_entry == then_bb {
+            else_bb
+        } else {
+            then_bb
+        };
         let continue_on_true = body_entry == then_bb;
 
-        let ctx = LoopCtx { header, body: body_set.clone() };
+        let ctx = LoopCtx {
+            header,
+            body: body_set.clone(),
+        };
         let body = self.build_sequence(body_entry, visited, Some(ctx), None);
 
         let loop_block = StructuredBlock::Loop {
@@ -211,11 +237,19 @@ fn compute_reachable(fn_ir: &FnIR) -> HashSet<BlockId> {
         if let Some(blk) = fn_ir.blocks.get(bid) {
             match &blk.term {
                 Terminator::Goto(t) => {
-                    if reachable.insert(*t) { queue.push(*t); }
+                    if reachable.insert(*t) {
+                        queue.push(*t);
+                    }
                 }
-                Terminator::If { then_bb, else_bb, .. } => {
-                    if reachable.insert(*then_bb) { queue.push(*then_bb); }
-                    if reachable.insert(*else_bb) { queue.push(*else_bb); }
+                Terminator::If {
+                    then_bb, else_bb, ..
+                } => {
+                    if reachable.insert(*then_bb) {
+                        queue.push(*then_bb);
+                    }
+                    if reachable.insert(*else_bb) {
+                        queue.push(*else_bb);
+                    }
                 }
                 _ => {}
             }
@@ -225,7 +259,10 @@ fn compute_reachable(fn_ir: &FnIR) -> HashSet<BlockId> {
     reachable
 }
 
-fn compute_loop_headers(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> HashMap<BlockId, HashSet<BlockId>> {
+fn compute_loop_headers(
+    fn_ir: &FnIR,
+    reachable: &HashSet<BlockId>,
+) -> HashMap<BlockId, HashSet<BlockId>> {
     let analyzer = LoopAnalyzer::new(fn_ir);
     let loops = analyzer.find_loops();
 
@@ -242,7 +279,10 @@ fn compute_loop_headers(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> HashMap<B
     grouped
 }
 
-fn compute_postdoms(fn_ir: &FnIR, reachable: &HashSet<BlockId>) -> HashMap<BlockId, HashSet<BlockId>> {
+fn compute_postdoms(
+    fn_ir: &FnIR,
+    reachable: &HashSet<BlockId>,
+) -> HashMap<BlockId, HashSet<BlockId>> {
     let mut postdoms = HashMap::new();
     let all: HashSet<BlockId> = reachable.iter().cloned().collect();
 
@@ -319,7 +359,9 @@ fn compute_postdom_depth(
         for &c in &candidates {
             let mut dominated_by_other = false;
             for &d in &candidates {
-                if d == c { continue; }
+                if d == c {
+                    continue;
+                }
                 if let Some(d_set) = postdoms.get(&d) {
                     if d_set.contains(&c) {
                         dominated_by_other = true;
@@ -347,7 +389,9 @@ fn compute_postdom_depth(
             d += 1;
             cur = *next;
             guard += 1;
-            if guard > reachable.len() { break; }
+            if guard > reachable.len() {
+                break;
+            }
         }
         depth.insert(b, d);
     }
@@ -358,7 +402,9 @@ fn compute_postdom_depth(
 fn successors(fn_ir: &FnIR, bid: BlockId) -> Vec<BlockId> {
     match &fn_ir.blocks[bid].term {
         Terminator::Goto(t) => vec![*t],
-        Terminator::If { then_bb, else_bb, .. } => vec![*then_bb, *else_bb],
+        Terminator::If {
+            then_bb, else_bb, ..
+        } => vec![*then_bb, *else_bb],
         _ => vec![],
     }
 }

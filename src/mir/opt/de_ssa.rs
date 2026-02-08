@@ -1,12 +1,15 @@
-﻿use crate::mir::*;
-use crate::mir::opt::parallel_copy::{emit_parallel_copy, Move};
+use crate::mir::opt::parallel_copy::{Move, emit_parallel_copy};
+use crate::mir::*;
 use crate::utils::Span;
 use std::collections::HashMap;
 
 pub fn run(fn_ir: &mut FnIR) -> bool {
     let mut changed = false;
 
-    let has_phi = fn_ir.values.iter().any(|v| matches!(v.kind, ValueKind::Phi { .. }));
+    let has_phi = fn_ir
+        .values
+        .iter()
+        .any(|v| matches!(v.kind, ValueKind::Phi { .. }));
     if !has_phi {
         return false;
     }
@@ -68,10 +71,10 @@ pub fn run(fn_ir: &mut FnIR) -> bool {
                             }
                         }
                     }
-                    moves_by_block
-                        .entry(*pred)
-                        .or_default()
-                        .push(Move { dst: dest.clone(), src: *src });
+                    moves_by_block.entry(*pred).or_default().push(Move {
+                        dst: dest.clone(),
+                        src: *src,
+                    });
                 }
             }
         }
@@ -148,7 +151,9 @@ fn build_succ_map(fn_ir: &FnIR) -> HashMap<BlockId, Vec<BlockId>> {
     for (bid, blk) in fn_ir.blocks.iter().enumerate() {
         let list = match &blk.term {
             Terminator::Goto(t) => vec![*t],
-            Terminator::If { then_bb, else_bb, .. } => vec![*then_bb, *else_bb],
+            Terminator::If {
+                then_bb, else_bb, ..
+            } => vec![*then_bb, *else_bb],
             _ => Vec::new(),
         };
         succs.insert(bid, list);
@@ -183,11 +188,19 @@ fn compute_reachable(fn_ir: &FnIR) -> std::collections::HashSet<BlockId> {
         if let Some(blk) = fn_ir.blocks.get(bid) {
             match &blk.term {
                 Terminator::Goto(target) => {
-                    if reachable.insert(*target) { queue.push(*target); }
+                    if reachable.insert(*target) {
+                        queue.push(*target);
+                    }
                 }
-                Terminator::If { then_bb, else_bb, .. } => {
-                    if reachable.insert(*then_bb) { queue.push(*then_bb); }
-                    if reachable.insert(*else_bb) { queue.push(*else_bb); }
+                Terminator::If {
+                    then_bb, else_bb, ..
+                } => {
+                    if reachable.insert(*then_bb) {
+                        queue.push(*then_bb);
+                    }
+                    if reachable.insert(*else_bb) {
+                        queue.push(*else_bb);
+                    }
                 }
                 _ => {}
             }
@@ -208,7 +221,9 @@ fn split_edge(fn_ir: &mut FnIR, from: BlockId, to: BlockId) -> BlockId {
                 *t = new_bid;
             }
         }
-        Terminator::If { then_bb, else_bb, .. } => {
+        Terminator::If {
+            then_bb, else_bb, ..
+        } => {
             if *then_bb == to {
                 *then_bb = new_bid;
             }
