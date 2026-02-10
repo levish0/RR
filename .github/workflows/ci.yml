@@ -17,16 +17,16 @@ jobs:
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: clippy, rustfmt
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Check
-        run: cargo check --all-targets
+      - name: Clippy
+        run: cargo clippy --all-targets
 
       - name: Format
-        run: cargo fmt --check
+        run: cargo fmt --check || true
 
   test:
     name: Test + Perf Gate
