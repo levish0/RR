@@ -10,3 +10,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `MirLowerer` now borrows `symbols` and `known_functions` by reference instead of taking owned clones, eliminating per-function `FxHashMap` copies during the MIR lowering loop.
+- `Lowerer::intern_symbol` uses a reverse lookup map (`name → SymbolId`) for O(1) deduplication instead of O(n) linear scan over the symbol table.
